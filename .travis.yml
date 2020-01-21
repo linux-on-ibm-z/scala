@@ -34,6 +34,8 @@ jobs:
       - stage: build
         arch: s390x
         if: type != pull_request
+        install:
+          - sudo apt-get install zip unzip
         script:
           # see comment in `bootstrap_fun` for details on the procedure
           # env available in each stage
