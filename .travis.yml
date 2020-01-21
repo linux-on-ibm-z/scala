@@ -49,6 +49,7 @@ jobs:
 
       # build the spec using jekyll
       - stage: build
+        arch: s390x
         language: ruby
         install:
           - ruby -v
