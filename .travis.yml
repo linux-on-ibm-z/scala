@@ -11,6 +11,7 @@ jobs:
     include:
       # full bootstrap and publish
       - stage: build
+        arch: s390x
         if: type != pull_request
         script:
           # see comment in `bootstrap_fun` for details on the procedure
