@@ -9,8 +9,6 @@ stages:
 
 jobs:
     include:
-      - os: linux
-        arch: s390x
       # full bootstrap and publish
       - stage: build
         if: type != pull_request
@@ -60,6 +58,27 @@ jobs:
         after_success:
           - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
 
+      - stage: build
+              arch: s390x
+              if: type != pull_request
+              script:
+                # see comment in `bootstrap_fun` for details on the procedure
+                # env available in each stage
+                #  - by travis config (see below): secret env vars
+                #  - by `common` script: WORKSPACE, IVY2_DIR, SBT_CMD, integrationRepoUrl
+                #  - by `bootstrap_fun`: publishPrivateTask, ...
+                - set -e
+                - (cd admin && ./init.sh)
+                - source scripts/common
+                - source scripts/bootstrap_fun
+                - determineScalaVersion
+                - removeExistingBuilds $integrationRepoUrl
+                - if [ ! -z "$STARR_REF" ]; then buildStarr; fi
+                - buildLocker
+                - buildQuick
+                - triggerScalaDist
+                - sbt -Dscala.build.compileWithDotty=true library/compile
+              allow_failure: true
 env:
   global:
     - ADOPTOPENJDK=8
