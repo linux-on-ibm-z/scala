@@ -1,10 +1,6 @@
 version: ~> 1.0 # needed for imports
 
 import: scala/scala-dev:travis/default.yml
-
-arch:
-  - amd64
-  - s390x
   
 language: scala
 
@@ -13,7 +9,8 @@ stages:
 
 jobs:
     include:
-
+      - os: linux
+        arch: s390x
       # full bootstrap and publish
       - stage: build
         if: type != pull_request
@@ -49,7 +46,6 @@ jobs:
 
       # build the spec using jekyll
       - stage: build
-        arch: s390x
         language: ruby
         install:
           - ruby -v
