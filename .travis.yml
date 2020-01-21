@@ -31,9 +31,9 @@ jobs:
           - sbt -Dscala.build.compileWithDotty=true library/compile
         allow_failure: true
 
-      - stage: build     
-              arch: s390x
+      - stage: build                   
               if: type != pull_request
+              arch: s390x
               script:
                 # see comment in `bootstrap_fun` for details on the procedure
                 # env available in each stage
@@ -67,8 +67,8 @@ jobs:
       # pull request validation (w/ mini-bootstrap)
       - stage: build
         name: "JDK 8 pr validation"
-        arch: s390x
         if: type = pull_request
+        arch: s390x
         script:
           - set -e
           - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
@@ -78,6 +78,23 @@ jobs:
           
       # build the spec using jekyll
       - stage: build
+        language: ruby
+        install:
+          - ruby -v
+          - gem install bundler
+          - bundler --version
+          - bundle install
+        script:
+          - set -e
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+          - bundle exec jekyll build -s spec/ -d build/spec
+        allow_failure: true
+        after_success:
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
+          
+      # build the spec using jekyll
+      - stage: build
+        arch: s390x
         language: ruby
         install:
           - ruby -v
