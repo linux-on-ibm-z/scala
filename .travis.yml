@@ -31,33 +31,6 @@ jobs:
           - sbt -Dscala.build.compileWithDotty=true library/compile
         allow_failure: true
 
-      # pull request validation (w/ mini-bootstrap)
-      - stage: build
-        name: "JDK 8 pr validation"
-        if: type = pull_request
-        script:
-          - set -e
-          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
-          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
-          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
-          - sbt -Dscala.build.compileWithDotty=true library/compile
-
-      # build the spec using jekyll
-      - stage: build
-        language: ruby
-        install:
-          - ruby -v
-          - gem install bundler
-          - bundler --version
-          - bundle install
-        script:
-          - set -e
-          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
-          - bundle exec jekyll build -s spec/ -d build/spec
-        allow_failure: true
-        after_success:
-          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
-
       - stage: build        
               if: type != pull_request
               arch: s390x
@@ -80,7 +53,18 @@ jobs:
                 - sbt -Dscala.build.compileWithDotty=true library/compile
               allow_failure: true
               
-        # pull request validation (w/ mini-bootstrap)
+      # pull request validation (w/ mini-bootstrap)
+      - stage: build
+        name: "JDK 8 pr validation"
+        if: type = pull_request
+        script:
+          - set -e
+          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
+          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
+          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
+          - sbt -Dscala.build.compileWithDotty=true library/compile
+          
+      # pull request validation (w/ mini-bootstrap)
       - stage: build
         name: "JDK 8 pr validation"
         if: type = pull_request
@@ -91,6 +75,23 @@ jobs:
           - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
           - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
           - sbt -Dscala.build.compileWithDotty=true library/compile
+          
+      # build the spec using jekyll
+      - stage: build
+        language: ruby
+        install:
+          - ruby -v
+          - gem install bundler
+          - bundler --version
+          - bundle install
+        script:
+          - set -e
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+          - bundle exec jekyll build -s spec/ -d build/spec
+        allow_failure: true
+        after_success:
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
+
 env:
   global:
     - ADOPTOPENJDK=8
