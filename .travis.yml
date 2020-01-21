@@ -2,6 +2,10 @@ version: ~> 1.0 # needed for imports
 
 import: scala/scala-dev:travis/default.yml
 
+arch:
+  - amd64
+  - arm64
+  
 language: scala
 
 stages:
