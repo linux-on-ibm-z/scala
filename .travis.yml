@@ -58,9 +58,9 @@ jobs:
         after_success:
           - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
 
-      - stage: build
-              arch: s390x
+      - stage: build        
               if: type != pull_request
+              arch: s390x
               script:
                 # see comment in `bootstrap_fun` for details on the procedure
                 # env available in each stage
@@ -79,6 +79,18 @@ jobs:
                 - triggerScalaDist
                 - sbt -Dscala.build.compileWithDotty=true library/compile
               allow_failure: true
+              
+        # pull request validation (w/ mini-bootstrap)
+      - stage: build
+        name: "JDK 8 pr validation"
+        if: type = pull_request
+        arch: s390x
+        script:
+          - set -e
+          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
+          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
+          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
+          - sbt -Dscala.build.compileWithDotty=true library/compile
 env:
   global:
     - ADOPTOPENJDK=8
