@@ -31,9 +31,9 @@ jobs:
           - sbt -Dscala.build.compileWithDotty=true library/compile
         allow_failure: true
 
-      - stage: build        
-              if: type != pull_request
+      - stage: build     
               arch: s390x
+              if: type != pull_request
               script:
                 # see comment in `bootstrap_fun` for details on the procedure
                 # env available in each stage
@@ -67,8 +67,8 @@ jobs:
       # pull request validation (w/ mini-bootstrap)
       - stage: build
         name: "JDK 8 pr validation"
-        if: type = pull_request
         arch: s390x
+        if: type = pull_request
         script:
           - set -e
           - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
