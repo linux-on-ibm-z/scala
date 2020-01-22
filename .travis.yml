@@ -70,6 +70,8 @@ jobs:
         name: "JDK 8 pr validation"
         arch: s390x
         #if: type = pull_request
+        before_install:
+          - sudo apt-get install zip unzip
         script:
           - set -e
           - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
