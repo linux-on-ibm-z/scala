@@ -10,6 +10,7 @@ stages:
 jobs:
     include:
 
+
       # full bootstrap and publish
       - stage: build
         if: type != pull_request
@@ -52,7 +53,7 @@ jobs:
           - bundle install
         script:
           - set -e
-          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+          - (cd admin && ./init.sh)
           - bundle exec jekyll build -s spec/ -d build/spec
         after_success:
           - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
