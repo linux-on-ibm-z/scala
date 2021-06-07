@@ -109,17 +109,17 @@ abstract class InlinerHeuristics extends PerRunInit {
 
             case Some(Left(w)) =>
               if (w.emitWarning(compilerSettings)) {
-                backendReporting.inlinerWarning(callsite.callsitePosition, w.toString)
+                backendReporting.optimizerWarning(callsite.callsitePosition, w.toString, backendUtils.optimizerWarningSiteString(callsite))
               }
 
             case None =>
               if (callsiteWarning.isDefined && callsiteWarning.get.emitWarning(compilerSettings))
-                backendReporting.inlinerWarning(pos, s"there was a problem determining if method ${callee.name} can be inlined: \n"+ callsiteWarning.get)
+                backendReporting.optimizerWarning(pos, s"there was a problem determining if method ${callee.name} can be inlined: \n"+ callsiteWarning.get, backendUtils.optimizerWarningSiteString(callsite))
           }
 
-        case Callsite(ins, _, _, Left(warning), _, _, _, pos, _, _) =>
+        case callsite @ Callsite(ins, _, _, Left(warning), _, _, _, pos, _, _) =>
           if (warning.emitWarning(compilerSettings))
-            backendReporting.inlinerWarning(pos, s"failed to determine if ${ins.name} should be inlined:\n$warning")
+            backendReporting.optimizerWarning(pos, s"failed to determine if ${ins.name} should be inlined:\n$warning", backendUtils.optimizerWarningSiteString(callsite))
       }
       (methodNode, requests)
     }).filterNot(_._2.isEmpty).toMap
@@ -240,7 +240,7 @@ abstract class InlinerHeuristics extends PerRunInit {
           def shouldInlineForwarder = Option {
             // trait super accessors are excluded here because they contain an `invokespecial` of the default method in the trait.
             // this instruction would have different semantics if inlined into some other class.
-            // we *do* inline trait super accessors if selected by a different heuristic. in this case, the `invokespcial` is then
+            // we *do* inline trait super accessors if selected by a different heuristic. in this case, the `invokespecial` is then
             // inlined in turn (chosen by the same heuristic), or the code is rolled back. but we don't inline them just because
             // they are forwarders.
             val isTraitSuperAccessor = backendUtils.isTraitSuperAccessor(callee.callee, callee.calleeDeclarationClass)
@@ -284,7 +284,7 @@ abstract class InlinerHeuristics extends PerRunInit {
   }
 
   /*
-  // using http://lihaoyi.github.io/Ammonite/
+  // using https://lihaoyi.github.io/Ammonite/
 
   load.ivy("com.google.guava" % "guava" % "18.0")
   val javaUtilFunctionClasses = {

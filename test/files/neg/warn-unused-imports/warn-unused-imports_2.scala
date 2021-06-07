@@ -1,4 +1,4 @@
-// scalac: -Xfatal-warnings -Ywarn-unused:imports
+// scalac: -Werror -Wunused:imports
 //
 class Bippo {
   def length: Int = 123

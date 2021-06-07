@@ -16,8 +16,10 @@ import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 import org.junit.Test
 import org.junit.Assert._
-import scala.collection
+
+import scala.annotation.unused
 import scala.collection.{mutable, immutable, concurrent}
+import scala.jdk.CollectionConverters._
 
 /**
   * Test that various set and map implementation conform to the following rules:
@@ -45,6 +47,7 @@ class SetMapRulesTest {
     override def toString: String = s"$id.$extra"
     def + (i: Int): Value = Value(id, extra + i)
     def toTuple: (Int, Int) = (id, extra)
+    def incrementExtra = new Value(id, extra + 1)
   }
   object Value {
     private[this] val cache = new mutable.HashMap[(Int, Int), Value]
@@ -113,7 +116,7 @@ class SetMapRulesTest {
     val entries1a = v1.iterator.map { case (k, v) => (k.toTuple, v.toTuple) }.toSet
     val v2 = f(v1)
     val entries1b = v1.iterator.map { case (k, v) => (k.toTuple, v.toTuple) }.toSet
-    val entries2 = v2.iterator.map { case (k, v) => (k.toTuple, v.toTuple) }.toSet
+    @unused val entries2 = v2.iterator.map { case (k, v) => (k.toTuple, v.toTuple) }.toSet
     assertEquals(s"$op should preserve original values ($entries1a should be equal to $entries1b)", entries1a, entries1b)
   }
 
@@ -152,6 +155,13 @@ class SetMapRulesTest {
     checkPreservesKeyIdentities(gen, "updated (equal value)")(_.updated(Value(1,2), Value(101,2)))
     checkPreservesKeyIdentities(gen, "+ (identical value)")(_.+((Value(1,2), Value(101,1))))
     checkPreservesKeyIdentities(gen, "+ (equal value)")(_.+((Value(1,2), Value(101,2))))
+
+    val values = Seq((Value(1,2), Value(101,2)))
+    val valuesSameCollection = gen().take(0).concat(values)
+    for (vs <- Seq(values, valuesSameCollection)) {
+      checkPreservesKeyIdentities(gen, "concat (identical key)")(_.concat(vs))
+    }
+
     checkAllValuesUpdated(gen, "updated (identical key)")(_.updated(Value(1,1), Value(101,2)).filter(_._1.id == 1))
     checkAllValuesUpdated(gen, "updated (equal key)")(_.updated(Value(1,2), Value(101,2)).filter(_._1.id == 1))
     checkAllValuesUpdated(gen, "+ (identical key)")(_.+((Value(1,1), Value(101,2))).filter(_._1.id == 1))
@@ -186,86 +196,97 @@ class SetMapRulesTest {
   private def checkImmutableSet(gen: () => immutable.Set[Value]): Unit = {
     checkSet(gen)
     checkPreservesIdentities(gen, "incl")(_.incl(Value(1,2)))
-    checkPreservesIdentities(gen, "concat")(_.concat(Seq(Value(1,2))))
+
+    val values = Seq(Value(1,2))
+    val valuesSameCollection = gen().take(0).concat(values)
+    for (vs <- Seq(values, valuesSameCollection)) {
+      checkPreservesIdentities(gen, "concat")(_.concat(vs))
+    }
+
+    for (xs <- Seq(gen().take(0).concat(gen().map(_.incrementExtra)), Set.from(gen().map(_.incrementExtra)))) {
+      checkPreservesIdentities(gen, "intersect")(_.intersect(xs))
+    }
   }
 
   // Immutable maps
 
-  @Test def testImmutableMap: Unit =
+  @Test def testImmutableMap(): Unit =
     mapdata.foreach(d => checkImmutableMap(() => immutable.Map.from(d)))
 
-  @Test def testImmutableListMap: Unit =
+  @Test def testImmutableListMap(): Unit =
     mapdata.foreach(d => checkImmutableMap(() => immutable.ListMap.from(d)))
 
-  @Test def testImmutableVectorMap: Unit =
+  @Test def testImmutableVectorMap(): Unit =
     mapdata.foreach(d => checkImmutableMap(() => immutable.VectorMap.from(d)))
 
-  @Test def testImmutableTreeMap: Unit =
+  @Test def testImmutableTreeMap(): Unit =
     mapdata.foreach(d => checkImmutableMap(() => immutable.TreeMap.from(d)))
 
-  @Test def testImmutableHashMap: Unit =
+  @Test def testImmutableHashMap(): Unit =
     mapdata.foreach(d => checkImmutableMap(() => immutable.HashMap.from(d)))
 
   // Mutable maps
 
-  @Test def testMutableMap: Unit =
+  @Test def testMutableMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.Map.from(d)))
 
-  @Test def testMutableHashMap: Unit =
+  @Test def testMutableHashMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.HashMap.from(d)))
 
-  @Test def testMutableOpenHashMap: Unit =
+  @deprecated("Uses OpenHashMap", since="2.13")
+  @Test def testMutableOpenHashMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.OpenHashMap.from(d)))
 
-  @Test def testMutableAnyRefMap: Unit =
+  @Test def testMutableAnyRefMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.AnyRefMap.from(d)))
 
-  @Test def testMutableTreeMap: Unit =
+  @Test def testMutableTreeMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.TreeMap.from(d)))
 
-  @Test def testMutableLinkedHashMap: Unit =
+  @Test def testMutableLinkedHashMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.LinkedHashMap.from(d)))
 
-  @Test def testMutableSeqMap: Unit =
+  @Test def testMutableSeqMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.SeqMap.from(d)))
 
-  @Test def testMutableListMap: Unit =
+  @deprecated("Uses ListMap", since="2.13")
+  @Test def testMutableListMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => mutable.ListMap.from(d)))
 
-  @Test def testConcurrentTrieMap: Unit =
+  @Test def testConcurrentTrieMap(): Unit =
     mapdata.foreach(d => checkMutableMap(() => concurrent.TrieMap.from(d)))
 
-  @Test def testJavaHashMap: Unit =
-    mapdata.foreach(d => checkMutableMap(() => JavaConverters.mapAsScalaMap(new java.util.HashMap[Value, Value]).addAll(d)))
+  @Test def testJavaHashMap(): Unit =
+    mapdata.foreach(d => checkMutableMap(() => new java.util.HashMap[Value, Value].asScala.addAll(d)))
 
   // Immutable sets
 
-  @Test def testImmutableSet: Unit =
+  @Test def testImmutableSet(): Unit =
     setdata.foreach(d => checkImmutableSet(() => immutable.Set.from(d)))
 
-  @Test def testImmutableHashSet: Unit =
+  @Test def testImmutableHashSet(): Unit =
     setdata.foreach(d => checkImmutableSet(() => immutable.HashSet.from(d)))
 
-  @Test def testImmutableListSet: Unit =
+  @Test def testImmutableListSet(): Unit =
     setdata.foreach(d => checkImmutableSet(() => immutable.ListSet.from(d)))
 
-  @Test def testImmutableTreeSet: Unit =
+  @Test def testImmutableTreeSet(): Unit =
     setdata.foreach(d => checkImmutableSet(() => immutable.TreeSet.from(d)))
 
   // Mutable sets
 
-  @Test def testMutableSet: Unit =
+  @Test def testMutableSet(): Unit =
     setdata.foreach(d => checkMutableSet(() => mutable.Set.from(d)))
 
-  @Test def testMutableHashSet: Unit =
+  @Test def testMutableHashSet(): Unit =
     setdata.foreach(d => checkMutableSet(() => mutable.HashSet.from(d)))
 
-  @Test def testMutableLinkedHashSet: Unit =
+  @Test def testMutableLinkedHashSet(): Unit =
     setdata.foreach(d => checkMutableSet(() => mutable.LinkedHashSet.from(d)))
 
-  @Test def testMutableTreeSet: Unit =
+  @Test def testMutableTreeSet(): Unit =
     setdata.foreach(d => checkMutableSet(() => mutable.TreeSet.from(d)))
 
-  @Test def testJavaHashSet: Unit =
-    setdata.foreach(d => checkMutableSet(() => JavaConverters.asScalaSet(new java.util.HashSet[Value]).addAll(d)))
+  @Test def testJavaHashSet(): Unit =
+    setdata.foreach(d => checkMutableSet(() => new java.util.HashSet[Value].asScala.addAll(d)))
 }

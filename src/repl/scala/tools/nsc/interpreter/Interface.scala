@@ -33,7 +33,7 @@ trait ReplCore {
     * and evaluation results, are printed via the supplied compiler's
     *  reporter. Values defined are available for future interpreted strings.
     *
-    * The return value is whether the line was interpreter successfully,
+    * The return value is whether the line was interpreted successfully,
     *  e.g. that there were no parse errors.
     */
   def interpret(line: String): Result
@@ -134,6 +134,11 @@ trait Repl extends ReplCore {
 
   def interpret(line: String, synthetic: Boolean): Result
 
+  def tokenize(line: String): List[TokenData]
+
+  /** TODO resolve scan, parse, compile, interpret, which just indicate how much work to do. */
+  def parseString(line: String): Result
+
   // Error on incomplete input
   def interpretFinally(line: String): Result
 
@@ -221,7 +226,7 @@ trait ScriptedRepl extends Repl {
   def addBackReferences(req: Request): Either[String, Request]
 }
 
-trait ReplReporter extends FilteringReporter {
+trait ReplReporter extends FilteringReporter with ReplStrings {
   def out: PrintWriter
 
   /**
@@ -314,5 +319,29 @@ trait PresentationCompilationResult {
 
   def typeAt(start: Int, end: Int): String
 
-  def candidates(tabCount: Int): (Int, List[String])
+  @deprecated("`completionCandidates` returns richer information (CompletionCandidates, not just strings)", since = "2.13.2")
+  def candidates(tabCount: Int): (Int, List[String]) =
+    completionCandidates(tabCount) match {
+      case (cursor, cands) =>
+        (cursor, cands.map(_.defString))
+    }
+
+  def completionCandidates(tabCount: Int = -1): (Int, List[CompletionCandidate])
 }
+
+case class CompletionCandidate(
+  defString: String,
+  arity: CompletionCandidate.Arity = CompletionCandidate.Nullary,
+  isDeprecated: Boolean = false,
+  isUniversal: Boolean = false)
+object CompletionCandidate {
+  sealed trait Arity
+  case object Nullary extends Arity
+  case object Nilary extends Arity
+  case object Other extends Arity
+  // purely for convenience
+  def fromStrings(defStrings: List[String]): List[CompletionCandidate] =
+    defStrings.map(CompletionCandidate(_))
+}
+
+case class TokenData(token: Int, start: Int, end: Int, isIdentifier: Boolean)

@@ -50,14 +50,15 @@ abstract class CodeGen[G <: Global](val global: G) extends PerRunInit {
     } catch {
       case ex: InterruptedException => throw ex
       case ex: Throwable =>
-        if (settings.debug) ex.printStackTrace()
-        error(s"Error while emitting ${unit.source}\n${ex.getMessage}")
+        if (settings.isDebug) ex.printStackTrace()
+        globalError(s"Error while emitting ${unit.source}\n${ex.getMessage}")
     }
 
     def genClassDefs(tree: Tree): Unit = tree match {
       case EmptyTree => ()
       case PackageDef(_, stats) => stats foreach genClassDefs
       case cd: ClassDef => frontendAccess.frontendSynch(genClassDef(cd))
+      case x            => throw new MatchError(x)
     }
 
     statistics.timed(statistics.bcodeGenStat) {

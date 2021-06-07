@@ -19,7 +19,6 @@ import java.net.URL
 import java.util.regex.PatternSyntaxException
 
 import File.pathSeparator
-import Jar.isJarOrZip
 import scala.tools.nsc.classpath.{ClassPathEntries, PackageEntry, PackageName}
 
 /**
@@ -132,7 +131,7 @@ object ClassPath {
 
     /* Get all subdirectories, jars, zips out of a directory. */
     def lsDir(dir: Directory, filt: String => Boolean = _ => true) =
-      dir.list.filter(x => filt(x.name) && (x.isDirectory || isJarOrZip(x))).map(_.path).toList
+      dir.list.filter(x => filt(x.name) && (x.isDirectory || Jar.isJarOrZip(x))).map(_.path).toList
 
     if (pattern == "*") lsDir(Directory("."))
     else if (pattern endsWith wildSuffix) lsDir(Directory(pattern dropRight 2))
@@ -202,7 +201,19 @@ object ClassPath {
 }
 
 trait ClassRepresentation {
+  def fileName: String
   def name: String
+  /** Low level way to extract the entry name without allocation. */
+  final def nameChars(buffer: Array[Char]): Int = {
+    val ix = fileName.lastIndexOf('.')
+    val nameLength = if (ix < 0) fileName.length else ix
+    if (nameLength > buffer.length)
+      -1
+    else {
+      fileName.getChars(0, fileName.lastIndexOf('.'), buffer, 0)
+      nameLength
+    }
+  }
   def binary: Option[AbstractFile]
   def source: Option[AbstractFile]
 }

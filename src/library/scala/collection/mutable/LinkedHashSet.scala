@@ -14,6 +14,7 @@ package scala
 package collection
 package mutable
 
+import scala.annotation.nowarn
 import scala.collection.generic.DefaultSerializable
 
 /** This class implements mutable sets using a hashtable.
@@ -69,7 +70,7 @@ class LinkedHashSet[A]
 
   override def last: A =
     if (size > 0) lastEntry.key
-    else throw new java.util.NoSuchElementException("Cannot call .last on empty LinkedHashSet")
+    else throw new NoSuchElementException("Cannot call .last on empty LinkedHashSet")
       
   override def lastOption: Option[A] =
     if (size > 0) Some(lastEntry.key)
@@ -77,7 +78,7 @@ class LinkedHashSet[A]
 
   override def head: A =
     if (size > 0) firstEntry.key
-    else throw new java.util.NoSuchElementException("Cannot call .head on empty LinkedHashSet")
+    else throw new NoSuchElementException("Cannot call .head on empty LinkedHashSet")
       
   override def headOption: Option[A] =
     if (size > 0) Some(firstEntry.key)
@@ -145,6 +146,7 @@ class LinkedHashSet[A]
     table.init(in, table.createNewEntry(in.readObject().asInstanceOf[A], null))
   }
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "LinkedHashSet"
 }
 

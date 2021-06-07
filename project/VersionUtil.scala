@@ -24,25 +24,25 @@ object VersionUtil {
 
   lazy val globalVersionSettings = Seq[Setting[_]](
     // Set the version properties globally (they are the same for all projects)
-    versionProperties in Global := versionPropertiesImpl.value,
+    Global / versionProperties := versionPropertiesImpl.value,
     gitProperties := gitPropertiesImpl.value,
-    version in Global := versionProperties.value.mavenVersion
+    Global / version := versionProperties.value.mavenVersion
   )
 
   lazy val generatePropertiesFileSettings = Seq[Setting[_]](
-    copyrightString := "Copyright 2002-2019, LAMP/EPFL and Lightbend, Inc.",
+    copyrightString := "Copyright 2002-2021, LAMP/EPFL and Lightbend, Inc.",
     shellBannerString := """
       |     ________ ___   / /  ___
       |    / __/ __// _ | / /  / _ |
       |  __\ \/ /__/ __ |/ /__/ __ |
       | /____/\___/_/ |_/____/_/ | |
       |                          |/  %s""".stripMargin.linesIterator.mkString("%n"),
-    resourceGenerators in Compile += generateVersionPropertiesFile.map(file => Seq(file)).taskValue,
+    Compile / resourceGenerators += generateVersionPropertiesFile.map(file => Seq(file)).taskValue,
     generateVersionPropertiesFile := generateVersionPropertiesFileImpl.value
   )
 
   lazy val generateBuildCharacterFileSettings = Seq[Setting[_]](
-    buildCharacterPropertiesFile := ((baseDirectory in ThisBuild).value / "buildcharacter.properties"),
+    buildCharacterPropertiesFile := ((ThisBuild / baseDirectory).value / "buildcharacter.properties"),
     generateBuildCharacterPropertiesFile := generateBuildCharacterPropertiesFileImpl.value
   )
 
@@ -161,7 +161,7 @@ object VersionUtil {
         "copyright.string" -> copyrightString.value,
         "shell.banner"     -> shellBannerString.value
       ),
-      (resourceManaged in Compile).value / s"${thisProject.value.id}.properties")
+      (Compile / resourceManaged).value / s"${thisProject.value.id}.properties")
   }
 
   private lazy val generateBuildCharacterPropertiesFileImpl: Def.Initialize[Task[File]] = Def.task {
@@ -183,14 +183,17 @@ object VersionUtil {
     propFile
   }
 
-  /** The global versions.properties data */
-  lazy val versionProps: Map[String, String] = {
+  private[build] def readProps(f: File): Map[String, String] = {
     val props = new Properties()
-    val in = new FileInputStream(file("versions.properties"))
+    val in = new FileInputStream(f)
     try props.load(in)
     finally in.close()
-    props.asScala.toMap.map {
-      case (k, v) => (k, sys.props.getOrElse(k, v)) // allow system properties to override versions.properties
-    }
+    props.asScala.toMap
+  }
+
+  /** The global versions.properties data */
+  lazy val versionProps: Map[String, String] = {
+    val versionProps = readProps(file("versions.properties"))
+    versionProps.map { case (k, v) => (k, sys.props.getOrElse(k, v)) } // allow sys props to override versions.properties
   }
 }

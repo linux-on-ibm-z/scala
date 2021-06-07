@@ -6,6 +6,7 @@ import org.junit.runners.JUnit4
 import org.junit.Test
 import org.junit.Assert._
 
+import scala.annotation.unused
 import scala.collection.mutable.{Builder, ListBuffer}
 import scala.tools.testkit.AssertUtil
 import scala.util.Try
@@ -24,7 +25,7 @@ class LazyListTest {
   }
 
   @Test // scala/bug#8990
-  def withFilter_can_retry_after_exception_thrown_in_filter: Unit = {
+  def withFilter_can_retry_after_exception_thrown_in_filter(): Unit = {
     // use mutable state to control an intermittent failure in filtering the LazyList
     var shouldThrow = true
 
@@ -40,7 +41,7 @@ class LazyListTest {
   }
 
   @Test // scala/bug#6881
-  def test_reference_equality: Unit = {
+  def test_reference_equality(): Unit = {
     // Make sure we're tested with reference equality
     val s = LazyList.from(0)
     assert(s == s, "Referentially identical LazyLists should be equal (==)")
@@ -50,16 +51,16 @@ class LazyListTest {
   }
 
   @Test
-  def t9886: Unit = {
+  def t9886(): Unit = {
     assertEquals(LazyList(None, Some(1)), None #:: LazyList(Some(1)))
     assertEquals(LazyList(None, Some(1)), LazyList(None) #::: LazyList(Some(1)))
   }
 
   @Test
-  def testLazyListDoesNotForceHead: Unit = {
+  def testLazyListDoesNotForceHead(): Unit = {
     var i = 0
     def f: Int = { i += 1; i }
-    val s = LazyList.empty.#::(f).#::(f).#::(f)
+    @unused val s = LazyList.empty.#::(f).#::(f).#::(f)
     assertEquals(0, i)
   }
 
@@ -69,20 +70,20 @@ class LazyListTest {
   }
 
   @Test
-  def testLazyListToStringWhenHeadAndTailBothAreNotEvaluated = {
+  def testLazyListToStringWhenHeadAndTailBothAreNotEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     assertEquals("LazyList(<not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenOnlyHeadIsEvaluated = {
+  def testLazyListToStringWhenOnlyHeadIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.head
     assertEquals("LazyList(1, <not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenHeadAndTailIsEvaluated = {
+  def testLazyListToStringWhenHeadAndTailIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.head
     l.tail
@@ -90,7 +91,7 @@ class LazyListTest {
   }
 
   @Test
-  def testLazyListToStringWhenHeadAndTailHeadIsEvaluated = {
+  def testLazyListToStringWhenHeadAndTailHeadIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.head
     l.tail.head
@@ -98,42 +99,42 @@ class LazyListTest {
   }
 
   @Test
-  def testLazyListToStringWhenHeadIsNotEvaluatedAndOnlyTailIsEvaluated = {
+  def testLazyListToStringWhenHeadIsNotEvaluatedAndOnlyTailIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.tail
     assertEquals("LazyList(1, <not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenHeadIsNotEvaluatedAndTailHeadIsEvaluated = {
+  def testLazyListToStringWhenHeadIsNotEvaluatedAndTailHeadIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.tail.head
     assertEquals("LazyList(1, 2, <not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenHeadIsNotEvaluatedAndTailTailIsEvaluated = {
+  def testLazyListToStringWhenHeadIsNotEvaluatedAndTailTailIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.tail.tail
     assertEquals("LazyList(1, 2, <not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhendHeadIsNotEvaluatedAndTailTailHeadIsEvaluated = {
+  def testLazyListToStringWhendHeadIsNotEvaluatedAndTailTailHeadIsEvaluated(): Unit = {
     val l = LazyList(1, 2, 3, 4, 5)
     l.tail.tail.head
     assertEquals("LazyList(1, 2, 3, <not computed>)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenLazyListIsForcedToList: Unit = {
+  def testLazyListToStringWhenLazyListIsForcedToList(): Unit = {
     val l = 1 #:: 2 #:: 3 #:: 4 #:: LazyList.empty
     l.toList
     assertEquals("LazyList(1, 2, 3, 4)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenLazyListIsEmpty: Unit = {
+  def testLazyListToStringWhenLazyListIsEmpty(): Unit = {
     // cached empty
     val l1 = LazyList.empty
     assertEquals("LazyList()", l1.toString)
@@ -143,14 +144,14 @@ class LazyListTest {
   }
 
   @Test
-  def testLazyListToStringForSingleElementList: Unit = {
+  def testLazyListToStringForSingleElementList(): Unit = {
     val l = LazyList(1)
     l.force
     assertEquals("LazyList(1)", l.toString)
   }
 
   @Test
-  def testLazyListToStringWhenLazyListHasCyclicReference: Unit = {
+  def testLazyListToStringWhenLazyListHasCyclicReference(): Unit = {
     lazy val cyc: LazyList[Int] = 1 #:: 2 #:: 3 #:: 4 #:: cyc
     assertEquals("LazyList(<not computed>)", cyc.toString)
     cyc.head
@@ -162,11 +163,12 @@ class LazyListTest {
     cyc.tail.tail.head
     assertEquals("LazyList(1, 2, 3, <not computed>)", cyc.toString)
     cyc.tail.tail.tail.head
-    assertEquals("LazyList(1, 2, 3, 4, <cycle>)", cyc.toString)
+    assertEquals("LazyList(1, 2, 3, 4, <not computed>)", cyc.toString)
     cyc.tail.tail.tail.tail.head
     assertEquals("LazyList(1, 2, 3, 4, <cycle>)", cyc.toString)
   }
 
+  @Test
   def hasCorrectDrop(): Unit = {
     assertEquals(LazyList(), LazyList().drop(2))
     assertEquals(LazyList(), LazyList(1).drop(2))
@@ -207,7 +209,7 @@ class LazyListTest {
   def toStringIsStackSafe(): Unit = {
     val l = LazyList.from(Range.inclusive(1, 10000))
     l.foreach(_ => ())
-    val s = l.toString // No exception thrown
+    @unused val s = l.toString // No exception thrown
   }
 
   @Test
@@ -217,7 +219,7 @@ class LazyListTest {
 
     var lazeCount = 0
     def lazeL(i: Int) = { lazeCount += 1; i }
-    val xs21 = lazeL(1) #:: lazeL(2) #:: lazeL(3) #:: LazyList.empty
+    @unused val xs21 = lazeL(1) #:: lazeL(2) #:: lazeL(3) #:: LazyList.empty
 
     assertEquals(0, lazeCount)
   }
@@ -264,7 +266,7 @@ class LazyListTest {
   }
 
   @Test
-  def t8680: Unit = {
+  def t8680(): Unit = {
     def pre(n: Int) = (-n to -1).to(LazyList)
 
     def cyc(m: Int) = {
@@ -366,5 +368,13 @@ class LazyListTest {
     }
     assertNoStackOverflow((new L).a)
     assertNoStackOverflow((new L).b)
+  }
+
+  // scala/bug#11931
+  @Test
+  def lazyAppendedAllExecutesOnce(): Unit = {
+    var count = 0
+    LazyList(1).lazyAppendedAll({ count += 1; Seq(2)}).toList
+    assertEquals(1, count)
   }
 }

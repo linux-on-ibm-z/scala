@@ -55,14 +55,20 @@ private[collection] object JavaCollectionWrappers extends Serializable {
   case class IterableWrapper[A](underlying: Iterable[A]) extends ju.AbstractCollection[A] with IterableWrapperTrait[A] with Serializable
 
   @SerialVersionUID(3L)
-  case class JIterableWrapper[A](underlying: jl.Iterable[A]) extends AbstractIterable[A] with Serializable {
+  case class JIterableWrapper[A](underlying: jl.Iterable[A])
+    extends AbstractIterable[A]
+      with StrictOptimizedIterableOps[A, Iterable, Iterable[A]]
+      with Serializable {
     def iterator = underlying.iterator.asScala
     override def iterableFactory = mutable.ArrayBuffer
     override def isEmpty: Boolean = !underlying.iterator().hasNext
   }
 
   @SerialVersionUID(3L)
-  case class JCollectionWrapper[A](underlying: ju.Collection[A]) extends AbstractIterable[A] with Serializable {
+  case class JCollectionWrapper[A](underlying: ju.Collection[A])
+    extends AbstractIterable[A]
+      with StrictOptimizedIterableOps[A, Iterable, Iterable[A]]
+      with Serializable {
     def iterator = underlying.iterator.asScala
     override def size = underlying.size
     override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
@@ -94,8 +100,10 @@ private[collection] object JavaCollectionWrappers extends Serializable {
   }
 
   @SerialVersionUID(3L)
-  case class JListWrapper[A](underlying: ju.List[A]) extends mutable.AbstractBuffer[A]
+  case class JListWrapper[A](underlying: ju.List[A])
+    extends mutable.AbstractBuffer[A]
       with SeqOps[A, mutable.Buffer, mutable.Buffer[A]]
+      with StrictOptimizedSeqOps[A, mutable.Buffer, mutable.Buffer[A]]
       with IterableFactoryDefaults[A, mutable.Buffer]
       with Serializable {
     def length = underlying.size
@@ -169,7 +177,11 @@ private[collection] object JavaCollectionWrappers extends Serializable {
   }
 
   @SerialVersionUID(3L)
-  case class JSetWrapper[A](underlying: ju.Set[A]) extends mutable.AbstractSet[A] with mutable.SetOps[A, mutable.Set, mutable.Set[A]] with Serializable {
+  case class JSetWrapper[A](underlying: ju.Set[A])
+    extends mutable.AbstractSet[A]
+      with mutable.SetOps[A, mutable.Set, mutable.Set[A]]
+      with StrictOptimizedSetOps[A, mutable.Set, mutable.Set[A]]
+      with Serializable {
 
     override def size: Int = underlying.size
     override def isEmpty: Boolean = underlying.isEmpty
@@ -299,17 +311,20 @@ private[collection] object JavaCollectionWrappers extends Serializable {
       with JMapWrapperLike[K, V, mutable.Map, mutable.Map[K, V]] with Serializable
 
   trait JMapWrapperLike[K, V, +CC[X, Y] <: mutable.MapOps[X, Y, CC, _], +C <: mutable.MapOps[K, V, CC, C]]
-    extends mutable.MapOps[K, V, CC, C] {
+    extends mutable.MapOps[K, V, CC, C]
+      with StrictOptimizedMapOps[K, V, CC, C]
+      with StrictOptimizedIterableOps[(K, V), mutable.Iterable, C] {
 
     def underlying: ju.Map[K, V]
 
     override def size = underlying.size
 
+    // support Some(null) if currently bound to null
     def get(k: K) = {
-      val v = underlying get k
+      val v = underlying.get(k)
       if (v != null)
         Some(v)
-      else if (underlying containsKey k)
+      else if (underlying.containsKey(k))
         Some(null.asInstanceOf[V])
       else
         None
@@ -318,11 +333,18 @@ private[collection] object JavaCollectionWrappers extends Serializable {
     def addOne(kv: (K, V)): this.type = { underlying.put(kv._1, kv._2); this }
     def subtractOne(key: K): this.type = { underlying remove key; this }
 
-    override def put(k: K, v: V): Option[V] = Option(underlying.put(k, v))
+    // support Some(null) if currently bound to null
+    override def put(k: K, v: V): Option[V] = {
+      val present = underlying.containsKey(k)
+      val result  = underlying.put(k, v)
+      if (present) Some(result) else None
+    }
 
-    override def update(k: K, v: V): Unit = { underlying.put(k, v) }
+    override def update(k: K, v: V): Unit = underlying.put(k, v)
 
-    override def remove(k: K): Option[V] = Option(underlying remove k)
+    // support Some(null) if currently bound to null
+    override def remove(k: K): Option[V] =
+      if (underlying.containsKey(k)) Some(underlying.remove(k)) else None
 
     def iterator: Iterator[(K, V)] = new AbstractIterator[(K, V)] {
       val ui = underlying.entrySet.iterator
@@ -458,8 +480,13 @@ private[collection] object JavaCollectionWrappers extends Serializable {
   }
 
   @SerialVersionUID(3L)
-  case class JPropertiesWrapper(underlying: ju.Properties) extends mutable.AbstractMap[String, String]
-            with mutable.MapOps[String, String, mutable.Map, mutable.Map[String, String]] with Serializable {
+  case class JPropertiesWrapper(underlying: ju.Properties)
+    extends mutable.AbstractMap[String, String]
+      with mutable.MapOps[String, String, mutable.Map, mutable.Map[String, String]]
+      with StrictOptimizedMapOps[String, String, mutable.Map, mutable.Map[String, String]]
+      with StrictOptimizedIterableOps[(String, String), mutable.Iterable, mutable.Map[String, String]]
+      with Serializable {
+    unzip
 
     override def size = underlying.size
     override def isEmpty: Boolean = underlying.isEmpty

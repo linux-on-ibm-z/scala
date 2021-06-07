@@ -58,22 +58,22 @@ import scala.util.matching.Regex
  * @example {{{
  * // Example of adding attributes to an enumeration by extending the Enumeration.Val class
  * object Planet extends Enumeration {
- *   protected case class Val(mass: Double, radius: Double) extends super.Val {
+ *   protected case class PlanetVal(mass: Double, radius: Double) extends super.Val {
  *     def surfaceGravity: Double = Planet.G * mass / (radius * radius)
  *     def surfaceWeight(otherMass: Double): Double = otherMass * surfaceGravity
  *   }
  *   import scala.language.implicitConversions
- *   implicit def valueToPlanetVal(x: Value): Val = x.asInstanceOf[Val]
+ *   implicit def valueToPlanetVal(x: Value): PlanetVal = x.asInstanceOf[PlanetVal]
  *
  *   val G: Double = 6.67300E-11
- *   val Mercury = Val(3.303e+23, 2.4397e6)
- *   val Venus   = Val(4.869e+24, 6.0518e6)
- *   val Earth   = Val(5.976e+24, 6.37814e6)
- *   val Mars    = Val(6.421e+23, 3.3972e6)
- *   val Jupiter = Val(1.9e+27, 7.1492e7)
- *   val Saturn  = Val(5.688e+26, 6.0268e7)
- *   val Uranus  = Val(8.686e+25, 2.5559e7)
- *   val Neptune = Val(1.024e+26, 2.4746e7)
+ *   val Mercury = PlanetVal(3.303e+23, 2.4397e6)
+ *   val Venus   = PlanetVal(4.869e+24, 6.0518e6)
+ *   val Earth   = PlanetVal(5.976e+24, 6.37814e6)
+ *   val Mars    = PlanetVal(6.421e+23, 3.3972e6)
+ *   val Jupiter = PlanetVal(1.9e+27, 7.1492e7)
+ *   val Saturn  = PlanetVal(5.688e+26, 6.0268e7)
+ *   val Uranus  = PlanetVal(8.686e+25, 2.5559e7)
+ *   val Neptune = PlanetVal(1.024e+26, 2.4746e7)
  * }
  *
  * println(Planet.values.filter(_.radius > 7.0e6))
@@ -155,7 +155,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
    * @throws   NoSuchElementException if no `Value` with a matching
    *           name is in this `Enumeration`
    */
-  final def withName(s: String): Value = values.find(_.toString == s).getOrElse(
+  final def withName(s: String): Value = values.byName.getOrElse(s,
     throw new NoSuchElementException(s"No value found for '$s'"))
 
   /** Creates a fresh value, part of this enumeration. */
@@ -208,7 +208,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
       val value = m.invoke(this).asInstanceOf[Value]
       // verify that outer points to the correct Enumeration: ticket #3616.
       if (value.outerEnum eq thisenum) {
-        val id = Int.unbox(classOf[Val] getMethod "id" invoke value)
+        val id: Int = value.id
         nmap += ((id, name))
       }
     }
@@ -282,6 +282,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
    *    not fall below zero), organized as a `BitSet`.
    *  @define Coll `collection.immutable.SortedSet`
    */
+  @SerialVersionUID(7229671200427364242L)
   class ValueSet private[ValueSet] (private[this] var nnIds: immutable.BitSet)
     extends immutable.AbstractSet[Value]
       with immutable.SortedSet[Value]
@@ -321,6 +322,8 @@ abstract class Enumeration (initial: Int) extends Serializable {
       super[SortedSet].zip[B](that)
     override def collect[B](pf: PartialFunction[Value, B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): immutable.SortedSet[B] =
       super[SortedSet].collect[B](pf)
+
+    @transient private[Enumeration] lazy val byName: Map[String, Value] = iterator.map( v => v.toString -> v).toMap
   }
 
   /** A factory object for value sets */

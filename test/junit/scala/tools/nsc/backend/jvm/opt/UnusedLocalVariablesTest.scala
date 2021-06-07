@@ -7,7 +7,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.tools.testkit.ASMConverters._
 import scala.tools.testkit.BytecodeTesting
 import scala.tools.testkit.BytecodeTesting._
@@ -35,7 +35,7 @@ class UnusedLocalVariablesTest extends BytecodeTesting {
     assertLocalVarCount(code, 6)
 
     val code2 = """def f(a: Long): Unit = { var x = if (a == 0L) return else () }"""
-    assertLocalVarCount(code2, 3) // remains
+    assertLocalVarCount(code2, 3)
   }
 
   @Test
@@ -76,7 +76,7 @@ class UnusedLocalVariablesTest extends BytecodeTesting {
   }
 
   def assertLocalVarCount(code: String, numVars: Int): Unit = {
-    assertTrue(compileMethod(code).localVars.length == numVars)
+    assertEquals(compileMethod(code).localVars.toString, numVars, compileMethod(code).localVars.length)
   }
 
 }

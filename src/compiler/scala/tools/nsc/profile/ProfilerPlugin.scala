@@ -12,6 +12,7 @@
 
 package scala.tools.nsc.profile
 
+import scala.annotation.nowarn
 import scala.tools.nsc.{Phase, Settings}
 
 /**
@@ -28,6 +29,7 @@ trait ProfilerPlugin {
     * @param settings the setting for the current compile
     * @return the run specific profiler, that will receive updates as the compile progresses
     */
+  @nowarn("cat=lint-inaccessible")
   def generate(profiler: RealProfiler, settings: Settings): ProfilerPluginRun
 }
 
@@ -38,7 +40,7 @@ trait ProfilerPluginRun {
   /** called before a phase */
   def beforePhase(phase: Phase): Unit
 
-  /** called afer a phase a phase */
+  /** called after a phase */
   def afterPhase(phase: Phase): Unit
 
   /** called when the compile run completes */

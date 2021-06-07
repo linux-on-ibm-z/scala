@@ -80,7 +80,7 @@ package internal
 // 57:          notOVERRIDE
 // 58:           notPRIVATE
 // 59:
-// 60:
+// 60:              SCALA3X
 // 61:
 // 62:
 // 63:
@@ -113,6 +113,7 @@ class ModifierFlags {
   final val LOCAL         = 1L << 19       // symbol is local to current class (i.e. private[this] or protected[this]
                                           // pre: PRIVATE or PROTECTED are also set
   final val JAVA          = 1L << 20       // symbol was defined by a Java class
+  final val SCALA3X       = 1L << 60       // class was defined in Scala 3
   final val STATIC        = 1L << 23       // static field, method or class
   final val CASEACCESSOR  = 1L << 24       // symbol is a case parameter (or its accessor, or a GADT skolem)
   final val TRAIT         = 1L << 25       // symbol is a trait
@@ -202,7 +203,7 @@ class Flags extends ModifierFlags {
   // The flags (1L << 59) to (1L << 63) are currently unused. If added to the InitialFlags mask,
   // they could be used as normal flags.
 
-  final val InitialFlags  = 0x0007FFFFFFFFFFFFL // normal flags, enabled from the first phase: 1L to (1L << 50)
+  final val InitialFlags  = 0x1007FFFFFFFFFFFFL // normal flags, enabled from the first phase: 1L to (1L << 50) + (1L << 60)
   final val LateFlags     = 0x00F8000000000000L // flags that override flags in (1L << 4) to (1L << 8): DEFERRED, FINAL, INTERFACE, METHOD, MODULE
   final val AntiFlags     = 0x0700000000000000L // flags that cancel flags in 1L to (1L << 2): PROTECTED, OVERRIDE, PRIVATE
   final val LateShift     = 47
@@ -212,7 +213,7 @@ class Flags extends ModifierFlags {
   final val PhaseIndependentFlags = 0xF807FFFFFFFFFE08L
   //this should be
   // final val PhaseIndependentFlags = (-1L & ~LateFlags & ~AntiFlags & ~(LateFlags >>> LateShift) & ~(AntiFlags >>> AntiShift)))
-  // but the constant folder doesnt optimise this! Good news is that is expected to be fixed soon :-)
+  // but the constant folder does not optimise this! Good news is that is expected to be fixed soon :-)
   assert (PhaseIndependentFlags == (-1L & ~LateFlags & ~AntiFlags & ~(LateFlags >>> LateShift) & ~(AntiFlags >>> AntiShift)))
 
 
@@ -226,7 +227,7 @@ class Flags extends ModifierFlags {
   // ------- late flags (set by a transformer phase) ---------------------------------
   //
   // Summary of when these are claimed to be first used.
-  // You can get this output with scalac -Xshow-phases -Ydebug.
+  // You can get this output with scalac -Vphases -Vdebug.
   //
   //     refchecks   7  [START] <latemethod>
   //    specialize  13  [START] <latefinal> <notprivate>
@@ -320,11 +321,15 @@ class Flags extends ModifierFlags {
 
 
   /** These flags are not pickled */
-  final val FlagsNotPickled = IS_ERROR | OVERLOADED | LIFTED | TRANS_FLAG | LOCKED | TRIEDCOOKING
+  final val FlagsNotPickled = IS_ERROR | OVERLOADED | LIFTED | TRANS_FLAG | LOCKED | TRIEDCOOKING | SCALA3X
 
   // A precaution against future additions to FlagsNotPickled turning out
   // to be overloaded flags thus not-pickling more than intended.
-  assert((OverloadedFlagsMask & FlagsNotPickled) == 0, flagsToString(OverloadedFlagsMask & FlagsNotPickled))
+  assert(
+    (OverloadedFlagsMask & FlagsNotPickled) == 0,
+    "overloaded flags should not overlap with FlagsNotPickled; found: " +
+      flagsToString(OverloadedFlagsMask & FlagsNotPickled)
+  )
 
   /** These flags are pickled */
   final val PickledFlags  = (
@@ -473,8 +478,8 @@ class Flags extends ModifierFlags {
     case      `notPROTECTED` => "<notprotected>"                      // (1L << 56)
     case  0x200000000000000L => "<notoverride>"                       // (1L << 57)
     case        `notPRIVATE` => "<notprivate>"                        // (1L << 58)
-    case NEEDS_TREES         => "<needs_trees>"                       // (1L << 59)
-    case 0x1000000000000000L => ""                                    // (1L << 60)
+    case         NEEDS_TREES => "<needs_trees>"                       // (1L << 59)
+    case             SCALA3X => "<scala3>"                            // (1L << 60)
     case 0x2000000000000000L => ""                                    // (1L << 61)
     case 0x4000000000000000L => ""                                    // (1L << 62)
     case 0x8000000000000000L => ""                                    // (1L << 63)
@@ -493,7 +498,9 @@ class Flags extends ModifierFlags {
     else "private[" + privateWithin + "]"
   )
 
-  @deprecated("use flagString on the flag-carrying member", "2.10.0")
+  // FIXME: This method is used several places internally. Remove its
+  //        internal use and then re-deprecate it.
+  // @deprecated("use flagString on the flag-carrying member", "2.10.0")
   private[scala] def flagsToString(flags: Long, privateWithin: String): String = {
     val access    = accessString(flags, privateWithin)
     val nonAccess = flagsToString(flags & ~AccessFlags)
@@ -501,7 +508,9 @@ class Flags extends ModifierFlags {
     List(nonAccess, access) filterNot (_ == "") mkString " "
   }
 
-  @deprecated("use flagString on the flag-carrying member", "2.10.0")
+  // FIXME: This method is used several places internally. Remove its
+  //        internal use and then re-deprecate it.
+  // @deprecated("use flagString on the flag-carrying member", "2.10.0")
   private[scala] def flagsToString(flags: Long): String = {
     // Fast path for common case
     if (flags == 0L) "" else {

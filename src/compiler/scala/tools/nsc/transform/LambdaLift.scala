@@ -53,7 +53,7 @@ abstract class LambdaLift extends InfoTransform {
     if (sym.isCapturedVariable) capturedVariableType(sym, tpe = lifted(tp), erasedTypes = true)
     else lifted(tp)
 
-  protected def newTransformer(unit: CompilationUnit): Transformer =
+  protected def newTransformer(unit: CompilationUnit): AstTransformer =
     new LambdaLifter(unit)
 
   class LambdaLifter(unit: CompilationUnit) extends explicitOuter.OuterPathTransformer(unit) {
@@ -536,7 +536,7 @@ abstract class LambdaLift extends InfoTransform {
             }
           else tree1
         case Block(stats, expr0) =>
-          val (lzyVals, rest) = stats partition {
+          val (lzyVals, rest) = partitionConserve(stats) {
             case stat: ValDef => stat.symbol.isLazy || stat.symbol.isModuleVar
             case _            => false
           }

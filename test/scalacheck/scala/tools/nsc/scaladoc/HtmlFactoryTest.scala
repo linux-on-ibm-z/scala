@@ -180,7 +180,7 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
     files.get("WithObject$.html").isDefined
   }
 
-  property("Trac #4325 - Don't link to syntetic companion") = {
+  property("Trac #4325 - Don't link to synthetic companion") = {
     checkTemplate("Trac4325.scala", "WithSynthetic.html"){ (_, s) =>
         ! s.contains("""href="WithSynthetic$.html"""")
     }
@@ -504,7 +504,7 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
 
   property("Indentation normalization for code blocks") = {
     checkTemplate("code-indent.scala", "C.html") { (_, s) =>
-      s.contains("<pre>a typicial indented\ncomment on multiple\ncomment lines</pre>") &&
+      s.contains("<pre>a typical indented\ncomment on multiple\ncomment lines</pre>") &&
       s.contains("<pre>one liner</pre>") &&
       s.contains("<pre>two lines, one useful</pre>") &&
       s.contains("<pre>line1\nline2\nline3\nline4</pre>") &&
@@ -537,16 +537,17 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
     val files = createTemplates("basic.scala")
     //println(files)
 
-    property("class") = files.get("com/example/p1/Clazz.html").exists { page =>
-      val html = toHtml(page)
-
-      property("implicit conversion") = html contains """<span class="modifier">implicit </span>"""
-
-      property("gt4s") = html contains """title="gt4s: $colon$colon""""
-
-      property("gt4s of a deprecated method") = html contains """title="gt4s: $colon$colon$colon$colon. Deprecated: """
-
-      true
+    // class
+    {
+      val html = files.get("com/example/p1/Clazz.html")
+        .map(page => { lazy val s = toHtml(page); () => s })
+      property("class") = html.map(_()).isDefined
+      def ifExists(op: String => Prop) = html.map(_()).fold(undecided)(op)
+      property("class:implicit conversion") =
+        ifExists(_ contains """<span class="modifier">implicit </span>""")
+      property("class:gt4s") = ifExists(_ contains """title="gt4s: $colon$colon"""")
+      property("class:gt4s of a deprecated method") =
+        ifExists(_ contains """title="gt4s: $colon$colon$colon$colon. Deprecated: """)
     }
 
     property("package") = files.contains("com/example/p1/index.html")
@@ -625,6 +626,18 @@ object HtmlFactoryTest extends Properties("HtmlFactory") {
     checkTemplate("t11318.scala", "p/C.html") { (_, s) =>
       s.contains("""protected[<span name="java.lang" class="extype">lang</span>]""") &&
         s.contains("""protected[<a href="index.html" name="p" id="p" class="extype">p</a>]""")
+    }
+  }
+
+  property("scala/bug#11871 case objects should have the case flag on the index page") = {
+    checkTemplate("t11871.scala", "main/index.html"){(_, s) =>
+      s.contains("""<span class="kind">case object</span>""") && s.contains("""<span class="name">ObjectA</span>""".stripMargin)
+    }
+  }
+
+  property("scala/bug#11871 case objects should have the case flag on the object's page") = {
+    checkTemplate("t11871.scala", "main/ObjectA$.html"){(_, s) =>
+      s.contains("""<span class="kind">case object</span>""") && s.contains("""<span class="name">ObjectA</span>""".stripMargin)
     }
   }
 }

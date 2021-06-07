@@ -18,8 +18,8 @@ import java.lang.IllegalStateException
 import scala.collection.generic.{BitOperations, DefaultSerializationProxy}
 import scala.collection.mutable.{Builder, ImmutableBuilder, ListBuffer}
 import scala.annotation.tailrec
-import scala.annotation.tailrec
 import scala.annotation.unchecked.uncheckedVariance
+import scala.language.implicitConversions
 
 /** Utility class for long maps.
   */
@@ -63,9 +63,9 @@ object LongMap {
   private[immutable] case object Nil extends LongMap[Nothing] {
     // Important, don't remove this! See IntMap for explanation.
     override def equals(that : Any) = that match {
-      case (that: AnyRef) if (this eq that) => true
-      case (that: LongMap[_]) => false // The only empty LongMaps are eq Nil
-      case that => super.equals(that)
+      case _: this.type  => true
+      case _: LongMap[_] => false // The only empty LongMaps are eq Nil
+      case _             => super.equals(that)
     }
   }
 
@@ -160,7 +160,7 @@ private[immutable] class LongMapKeyIterator[V](it: LongMap[V]) extends LongMapIt
 
 /**
   *  Specialised immutable map structure for long keys, based on
-  *  [[http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.37.5452 Fast Mergeable Long Maps]]
+  *  [[https://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.37.5452 Fast Mergeable Long Maps]]
   *  by Okasaki and Gill. Essentially a trie based on binary digits of the integers.
   *
   *  Note: This class is as of 2.8 largely superseded by HashMap.
@@ -257,7 +257,7 @@ sealed abstract class LongMap[+T] extends AbstractMap[Long, T]
 
   override protected[this] def className = "LongMap"
 
-  override def isEmpty = this == LongMap.Nil
+  override def isEmpty = this eq LongMap.Nil
   override def knownSize: Int = if (isEmpty) 0 else super.knownSize
   override def filter(f: ((Long, T)) => Boolean): LongMap[T] = this match {
     case LongMap.Bin(prefix, mask, left, right) => {

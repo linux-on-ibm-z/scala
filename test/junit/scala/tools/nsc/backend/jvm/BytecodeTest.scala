@@ -2,17 +2,16 @@ package scala.tools.nsc.backend.jvm
 
 import org.junit.Assert._
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 
+import scala.annotation.unused
+import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes._
 import scala.tools.testkit.ASMConverters._
 import scala.tools.testkit.BytecodeTesting
 import scala.tools.testkit.BytecodeTesting._
-import scala.collection.JavaConverters._
 import scala.tools.asm.Opcodes
+import scala.tools.asm.tree.MethodNode
 
-@RunWith(classOf[JUnit4])
 class BytecodeTest extends BytecodeTesting {
   import compiler._
 
@@ -88,7 +87,7 @@ class BytecodeTest extends BytecodeTesting {
         |  def t5(a: AnyRef) = (a eq null) || (null ne a)
         |  def t6(a: Int, b: Boolean) = if ((a == 10) && b || a != 1) 1 else 2
         |  def t7(a: AnyRef, b: AnyRef) = a == b
-        |  def t8(a: AnyRef) = Nil == a || "" != a
+        |  def t8(a: AnyRef) = scala.collection.immutable.Nil == a || "" != a
         |}
       """.stripMargin
 
@@ -174,14 +173,14 @@ class BytecodeTest extends BytecodeTesting {
     val t = getMethod(c, "t")
     val isFrameLine = (x: Instruction) => x.isInstanceOf[FrameEntry] || x.isInstanceOf[LineNumber]
     assertSameCode(t.instructions.filterNot(isFrameLine), List(
-      Label(0), Ldc(LDC, ""), Label(3), VarOp(ASTORE, 1),
-      Label(5), VarOp(ALOAD, 1), Jump(IFNULL, Label(21)),
-      Label(10), VarOp(ALOAD, 0), Invoke(INVOKEVIRTUAL, "C", "foo", "()V", false), Label(14), Op(ACONST_NULL), VarOp(ASTORE, 1), Label(18), Jump(GOTO, Label(5)),
-      Label(21), VarOp(ALOAD, 0), Invoke(INVOKEVIRTUAL, "C", "bar", "()V", false), Label(26), Op(RETURN), Label(28)))
+      Label(0), Ldc(LDC, ""), VarOp(ASTORE, 1),
+      Label(4), VarOp(ALOAD, 1), Jump(IFNULL, Label(20)),
+      Label(9), VarOp(ALOAD, 0), Invoke(INVOKEVIRTUAL, "C", "foo", "()V", false), Label(13), Op(ACONST_NULL), VarOp(ASTORE, 1), Label(17), Jump(GOTO, Label(4)),
+      Label(20), VarOp(ALOAD, 0), Invoke(INVOKEVIRTUAL, "C", "bar", "()V", false), Label(25), Op(RETURN), Label(27)))
     val labels = t.instructions collect { case l: Label => l }
     val x = t.localVars.find(_.name == "x").get
     assertEquals(x.start, labels(1))
-    assertEquals(x.end, labels(7))
+    assertEquals(x.end, labels(6))
   }
 
   @Test
@@ -196,7 +195,7 @@ class BytecodeTest extends BytecodeTesting {
       """.stripMargin
     val t = compileClass(code)
     val tMethod = getMethod(t, "t$")
-    val invoke = Invoke(INVOKEVIRTUAL, "java/lang/Object", "toString", "()Ljava/lang/String;", false)
+    @unused val invoke = Invoke(INVOKEVIRTUAL, "java/lang/Object", "toString", "()Ljava/lang/String;", false)
     // ths static accessor is positioned at the line number of the accessed method.
     assertSameCode(tMethod.instructions,
       List(Label(0), LineNumber(2, Label(0)), VarOp(ALOAD, 0), Invoke(INVOKESPECIAL, "T", "t", "()V", true), Op(RETURN), Label(4))
@@ -335,5 +334,43 @@ class BytecodeTest extends BytecodeTesting {
     assertInvoke(getMethod(cs.find(_.name == "D").get, "<init>"), "scala/runtime/Statics", "releaseFence")
     assertInvoke(getMethod(cs.find(_.name == "E").get, "<init>"), "scala/runtime/Statics", "releaseFence")
     assertDoesNotInvoke(getMethod(cs.find(_.name == "F").get, "<init>"), "releaseFence")
+  }
+
+  @Test
+  def t11718(): Unit = {
+    val code = """class A11718 { private val a = ""; lazy val b = a }"""
+    val cs = compileClasses(code)
+    val A = cs.find(_.name == "A11718").get
+    val a = A.fields.asScala.find(_.name == "a").get
+    assertEquals(0, a.access & Opcodes.ACC_FINAL)
+  }
+
+  @Test
+  def t12362(): Unit = {
+    val code                 =
+      """object Test {
+        |  def foo(value: String) = {
+        |    println(value)
+        |  }
+        |
+        |  def abcde(value1: String, value2: Long, value3: Double, value4: Int, value5: Double): Double = {
+        |    println(value1)
+        |    value5
+        |  }
+        |}""".stripMargin
+
+    val List(mirror, _) = compileClasses(code)
+    assertEquals(mirror.name, "Test")
+
+    val foo    = getAsmMethod(mirror, "foo")
+    val abcde  = getAsmMethod(mirror, "abcde")
+
+    def t(m: MethodNode, r: List[(String, String, Int)]) = {
+      assertTrue((m.access & Opcodes.ACC_STATIC) != 0)
+      assertEquals(r, m.localVariables.asScala.toList.map(l => (l.desc, l.name, l.index)))
+    }
+
+    t(foo, List(("Ljava/lang/String;", "value", 0)))
+    t(abcde, List(("Ljava/lang/String;", "value1", 0), ("J", "value2", 1), ("D", "value3", 3), ("I", "value4", 5), ("D", "value5", 6)))
   }
 }

@@ -14,13 +14,11 @@ package scala.tools.nsc
 package plugins
 
 import java.net.URL
-
-import java.net.URL
 import java.util
 
 import scala.reflect.internal.util.ScalaClassLoader
 import scala.reflect.io.Path
-import scala.tools.nsc.io.AbstractFile
+import scala.tools.nsc.Reporting.WarningCategory
 import scala.tools.nsc.plugins.Plugin.pluginClassLoadersCache
 import scala.tools.nsc.typechecker.Macros
 import scala.tools.nsc.util.ClassPath
@@ -47,7 +45,7 @@ trait Plugins { global: Global =>
     // Explicit parameterization of recover to avoid -Xlint warning about inferred Any
     errors foreach (_.recover[Any] {
       // legacy behavior ignores altogether, so at least warn devs
-      case e: MissingPluginException => if (global.isDeveloper) warning(e.getMessage)
+      case e: MissingPluginException => if (global.isDeveloper) runReporting.warning(NoPosition, e.getMessage, WarningCategory.OtherDebug, site = "")
       case e: Exception              => inform(e.getMessage)
     })
     val classes = goods map (_.get)  // flatten
@@ -116,32 +114,27 @@ trait Plugins { global: Global =>
    */
   protected def loadPlugins(): List[Plugin] = {
     // remove any with conflicting names or subcomponent names
-    def pick(
-      plugins: List[Plugin],
-      plugNames: Set[String],
-      phaseNames: Set[String]): List[Plugin] =
-    {
-      if (plugins.isEmpty) return Nil // early return
+    def pick(plugins: List[Plugin], plugNames: Set[String], phaseNames: Set[String]): List[Plugin] = plugins match {
+      case Nil          => Nil // early return
+      case plug :: tail =>
+        val plugPhaseNames    = Set(plug.components map (_.phaseName): _*)
+        def withoutPlug       = pick(tail, plugNames, plugPhaseNames)
+        def withPlug          = plug :: pick(tail, plugNames + plug.name, phaseNames ++ plugPhaseNames)
+        lazy val commonPhases = phaseNames intersect plugPhaseNames
 
-      val plug :: tail      = plugins
-      val plugPhaseNames    = Set(plug.components map (_.phaseName): _*)
-      def withoutPlug       = pick(tail, plugNames, plugPhaseNames)
-      def withPlug          = plug :: pick(tail, plugNames + plug.name, phaseNames ++ plugPhaseNames)
-      lazy val commonPhases = phaseNames intersect plugPhaseNames
+        def note(msg: String): Unit = if (settings.verbose) inform(msg format plug.name)
+        def fail(msg: String)       = { note(msg) ; withoutPlug }
 
-      def note(msg: String): Unit = if (settings.verbose) inform(msg format plug.name)
-      def fail(msg: String)       = { note(msg) ; withoutPlug }
-
-      if (plugNames contains plug.name)
-        fail("[skipping a repeated plugin: %s]")
-      else if (settings.disable.value contains plug.name)
-        fail("[disabling plugin: %s]")
-      else if (!commonPhases.isEmpty)
-        fail("[skipping plugin %s because it repeats phase names: " + (commonPhases mkString ", ") + "]")
-      else {
-        note("[loaded plugin %s]")
-        withPlug
-      }
+        if (plugNames contains plug.name)
+          fail("[skipping a repeated plugin: %s]")
+        else if (settings.disable.value contains plug.name)
+          fail("[disabling plugin: %s]")
+        else if (!commonPhases.isEmpty)
+          fail("[skipping plugin %s because it repeats phase names: " + (commonPhases mkString ", ") + "]")
+        else {
+          note("[loaded plugin %s]")
+          withPlug
+        }
     }
 
     val plugs = pick(roughPluginsList, Set(), (phasesSet map (_.phaseName)).toSet)
@@ -157,7 +150,7 @@ trait Plugins { global: Global =>
     } globalError("bad option: -P:" + opt)
 
     // Plugins may opt out, unless we just want to show info
-    plugs filter (p => p.init(p.options, globalError) || (settings.debug && settings.isInfo))
+    plugs filter (p => p.init(p.options, globalError) || (settings.isDebug && settings.isInfo))
   }
 
   lazy val plugins: List[Plugin] = loadPlugins()
@@ -190,7 +183,7 @@ trait Plugins { global: Global =>
     val classpath: Seq[URL] = if (settings.YmacroClasspath.isSetByUser) {
       for {
         file <- ClassPath.expandPath(settings.YmacroClasspath.value, true)
-        af <- Option(AbstractFile getDirectory file)
+        af <- Option(settings.pathFactory.getDirectory(file))
       } yield af.file.toURI.toURL
     } else global.classPath.asURLs
     def newLoader: () => ScalaClassLoader.URLClassLoader = () => {

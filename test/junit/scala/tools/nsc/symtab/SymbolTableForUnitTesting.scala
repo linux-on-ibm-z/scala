@@ -7,6 +7,7 @@ import scala.reflect.internal.util.Statistics
 import scala.tools.util.PathResolver
 import util.ClassPath
 import io.AbstractFile
+import scala.tools.nsc.Reporting.WarningCategory
 
 /**
  * A complete SymbolTable implementation designed to be used in JUnit tests.
@@ -19,12 +20,12 @@ import io.AbstractFile
  */
 class SymbolTableForUnitTesting extends SymbolTable {
   // Members declared in scala.reflect.api.Trees
-  override def newStrictTreeCopier: TreeCopier = new StrictTreeCopier
-  override def newLazyTreeCopier: TreeCopier = new LazyTreeCopier
+  override def newStrictTreeCopier: TreeCopier = new StrictTreeCopierForUnitTesting
+  override def newLazyTreeCopier: TreeCopier = new LazyTreeCopierForUnitTesting
   trait TreeCopier extends InternalTreeCopierOps
   // these should be mocks
-  class StrictTreeCopier extends super.StrictTreeCopier with TreeCopier
-  class LazyTreeCopier extends super.LazyTreeCopier with TreeCopier
+  class StrictTreeCopierForUnitTesting extends super.StrictTreeCopier with TreeCopier
+  class LazyTreeCopierForUnitTesting extends super.LazyTreeCopier with TreeCopier
 
   override def isCompilerUniverse: Boolean = true
 
@@ -51,6 +52,8 @@ class SymbolTableForUnitTesting extends SymbolTable {
       sym.info.member(name)
     protected override def compileLate(srcfile: AbstractFile): Unit =
       sys.error(s"We do not expect compileLate to be called in SymbolTableTest. The srcfile passed in is $srcfile")
+    def warning(pos: Position, msg: String, category: WarningCategory, site: String): Unit =
+      reporter.warning(pos, msg)
   }
 
   class GlobalMirror extends Roots(NoSymbol) {
@@ -88,7 +91,7 @@ class SymbolTableForUnitTesting extends SymbolTable {
   // minimal Run to get Reporting wired
   def currentRun = new RunReporting {}
   class PerRunReporting extends PerRunReportingBase {
-    def deprecationWarning(pos: Position, msg: String, since: String): Unit = reporter.warning(pos, msg)
+    def deprecationWarning(pos: Position, msg: String, since: String, site: String, origin: String): Unit = reporter.warning(pos, msg)
   }
   protected def PerRunReporting = new PerRunReporting
 
@@ -97,14 +100,10 @@ class SymbolTableForUnitTesting extends SymbolTable {
   def log(msg: => AnyRef): Unit = println(msg)
   def mirrorThatLoaded(sym: Symbol): Mirror = rootMirror
   val phases: Seq[Phase] = List(NoPhase, SomePhase)
-  val phaseWithId: Array[Phase] = {
-    val maxId = phases.map(_.id).max
-    val phasesArray = Array.ofDim[Phase](maxId+1)
-    phases foreach { phase =>
-      phasesArray(phase.id) = phase
-    }
-    phasesArray
+  phases foreach { phase =>
+    phaseWithId(phase.id) = phase
   }
+
   lazy val treeInfo = new scala.reflect.internal.TreeInfo {
     val global: SymbolTableForUnitTesting.this.type = SymbolTableForUnitTesting.this
   }

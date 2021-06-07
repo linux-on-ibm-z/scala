@@ -16,7 +16,7 @@ package interactive
 import java.io.{FileReader, FileWriter}
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.annotation.{elidable, tailrec}
+import scala.annotation.{elidable, nowarn, tailrec}
 import scala.collection.mutable
 import scala.collection.mutable.{HashSet, LinkedHashMap}
 import scala.jdk.javaapi.CollectionConverters
@@ -56,6 +56,7 @@ trait InteractiveAnalyzer extends Analyzer {
     override def missingSelectErrorTree(tree: Tree, qual: Tree, name: Name): Tree = tree match {
       case Select(_, _)             => treeCopy.Select(tree, qual, name)
       case SelectFromTypeTree(_, _) => treeCopy.SelectFromTypeTree(tree, qual, name)
+      case _                        => tree
     }
   }
 
@@ -424,7 +425,8 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
     while (loop) {
       breakable{
         loop = false
-        if (!interruptsEnabled) return
+        // TODO refactor to eliminate breakable/break/return?
+        (if (!interruptsEnabled) return): @nowarn("cat=lint-nonlocal-return")
         if (pos == NoPosition || nodesSeen % yieldPeriod == 0)
           Thread.`yield`()
 
@@ -453,7 +455,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
                 debugLog("ask finished"+timeStep)
                 interruptsEnabled = true
               }
-            loop = true; break
+            loop = true; break()
             case _ =>
           }
 
@@ -636,8 +638,8 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
 
   /** Reset unit to unloaded state */
   private def reset(unit: RichCompilationUnit): Unit = {
-    unit.depends.clear()
-    unit.defined.clear()
+    unit.depends.clear(): @nowarn("cat=deprecation")
+    unit.defined.clear(): @nowarn("cat=deprecation")
     unit.synthetics.clear()
     unit.toCheck.clear()
     unit.checkedFeatures = Set()
@@ -653,6 +655,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
   private def parseAndEnter(unit: RichCompilationUnit): Unit =
     if (unit.status == NotLoaded) {
       debugLog("parsing: "+unit)
+      runReporting.clearSuppressionsComplete(unit.source)
       currentTyperRun.compileLate(unit)
       if (debugIDE && !reporter.hasErrors) validatePositions(unit.body)
       if (!unit.isJava) syncTopLevelSyms(unit)
@@ -876,10 +879,10 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
       sym.isType || {
         try {
           val tp1 = pre.memberType(alt) onTypeError NoType
-          val tp2 = adaptToNewRunMap(sym.tpe) substSym (originalTypeParams, sym.owner.typeParams)
+          val tp2 = adaptToNewRunMap(sym.tpe).substSym(originalTypeParams, sym.owner.typeParams)
           matchesType(tp1, tp2, alwaysMatchSimple = false) || {
             debugLog(s"findMirrorSymbol matchesType($tp1, $tp2) failed")
-            val tp3 = adaptToNewRunMap(sym.tpe) substSym (originalTypeParams, alt.owner.typeParams)
+            val tp3 = adaptToNewRunMap(sym.tpe).substSym(originalTypeParams, alt.owner.typeParams)
             matchesType(tp1, tp3, alwaysMatchSimple = false) || {
               debugLog(s"findMirrorSymbol fallback matchesType($tp1, $tp3) failed")
               false
@@ -1074,6 +1077,9 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
     //if (debugIDE) typeMembers(pos)
   }
 
+  // it's expected that later items in the `LazyList` supersede earlier items.
+  // (once a second item becomes available, you entirely discard the first item,
+  // rather than combine them)
   private def typeMembers(pos: Position): LazyList[List[TypeMember]] = {
     // Choosing which tree will tell us the type members at the given position:
     //   If pos leads to an Import, type the expr
@@ -1151,7 +1157,6 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
           addTypeMember(sym, vpre, inherited = false, view.tree.symbol)
         }
       }
-      //println()
       LazyList(members.allMembers)
     }
   }
@@ -1163,29 +1168,34 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
     def name: Name
     /** Cursor Offset - positionDelta == position of the start of the name */
     def positionDelta: Int
+    def forImport: Boolean
     def matchingResults(nameMatcher: (Name) => Name => Boolean = entered => candidate => candidate.startsWith(entered)): List[M] = {
       val enteredName = if (name == nme.ERROR) nme.EMPTY else name
       val matcher = nameMatcher(enteredName)
       results filter { (member: Member) =>
         val symbol = member.sym
         def isStable = member.tpe.isStable || member.sym.isStable || member.sym.getterIn(member.sym.owner).isStable
-        def isJunk = symbol.name.isEmpty || !isIdentifierStart(member.sym.name.charAt(0)) // e.g. <byname>
-        !isJunk && member.accessible && !symbol.isConstructor && (name.isEmpty || matcher(member.sym.name) && (symbol.name.isTermName == name.isTermName || name.isTypeName && isStable))
+        def isJunk = !symbol.exists || symbol.name.isEmpty || !isIdentifierStart(member.sym.name.charAt(0)) // e.g. <byname>
+        def nameTypeOk = forImport ||                  // Completing an import: keep terms and types.
+          symbol.name.isTermName == name.isTermName || // Keep names of the same type
+          name.isTypeName && isStable                  // Completing a type: keep stable terms (paths)
+        !isJunk && member.accessible && !symbol.isConstructor && (name.isEmpty || matcher(member.sym.name) && nameTypeOk)
       }
     }
   }
   object CompletionResult {
-    final case class ScopeMembers(positionDelta: Int, results: List[ScopeMember], name: Name) extends CompletionResult {
+    final case class ScopeMembers(positionDelta: Int, results: List[ScopeMember], name: Name, forImport: Boolean) extends CompletionResult {
       type M = ScopeMember
     }
     final case class TypeMembers(positionDelta: Int, qualifier: Tree, tree: Tree, results: List[TypeMember], name: Name) extends CompletionResult {
+      def forImport: Boolean = tree.isInstanceOf[Import]
       type M = TypeMember
     }
     case object NoResults extends CompletionResult {
       override def results = Nil
       override def name = nme.EMPTY
       override def positionDelta = 0
-
+      override def forImport: Boolean = false
     }
     private val CamelRegex = "([A-Z][^A-Z]*)".r
     private def camelComponents(s: String, allowSnake: Boolean): List[String] = {
@@ -1229,7 +1239,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
     val focus1: Tree = typedTreeAt(pos)
     def typeCompletions(tree: Tree, qual: Tree, nameStart: Int, name: Name): CompletionResult = {
       val qualPos = qual.pos
-      val allTypeMembers = typeMembers(qualPos).toList.flatten
+      val allTypeMembers = typeMembers(qualPos).last
       val positionDelta: Int = pos.start - nameStart
       val subName: Name = name.newName(new String(pos.source.content, nameStart, pos.start - nameStart)).encodedName
       CompletionResult.TypeMembers(positionDelta, qual, tree, allTypeMembers, subName)
@@ -1240,7 +1250,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
         val nameStart = i.pos.start
         val positionDelta: Int = pos.start - nameStart
         val subName = name.subName(0, pos.start - i.pos.start)
-        CompletionResult.ScopeMembers(positionDelta, allMembers, subName)
+        CompletionResult.ScopeMembers(positionDelta, allMembers, subName, forImport = true)
       case imp@Import(qual, selectors) =>
         selectors.reverseIterator.find(_.namePos <= pos.start) match {
           case None => CompletionResult.NoResults
@@ -1259,7 +1269,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
         val allMembers = scopeMembers(pos)
         val positionDelta: Int = pos.start - focus1.pos.start
         val subName = name.subName(0, positionDelta)
-        CompletionResult.ScopeMembers(positionDelta, allMembers, subName)
+        CompletionResult.ScopeMembers(positionDelta, allMembers, subName, forImport = false)
       case _ =>
         CompletionResult.NoResults
     }
@@ -1373,7 +1383,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
     val symbols =
       Set(UnitClass, BooleanClass, ByteClass,
           ShortClass, IntClass, LongClass, FloatClass,
-          DoubleClass, NilModule, ListClass) ++ TupleClass.seq
+          DoubleClass, NilModule, ListClass, PredefModule) ++ TupleClass.seq ++ ArrayModule_overloadedApply.alternatives
     symbols.foreach(_.initialize)
   }
 

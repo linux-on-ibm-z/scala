@@ -14,13 +14,13 @@ package scala
 package runtime
 
 import scala.collection.{AbstractIterator, AnyConstr, SortedOps, StrictOptimizedIterableOps, StringOps, StringView, View}
+import scala.collection.generic.IsIterable
 import scala.collection.immutable.{ArraySeq, NumericRange}
 import scala.collection.mutable.StringBuilder
+import scala.math.min
 import scala.reflect.{ClassTag, classTag}
 import java.lang.{Class => jClass}
 import java.lang.reflect.{Method => JMethod}
-
-import scala.collection.generic.IsIterable
 
 /** The object ScalaRunTime provides support methods required by
  *  the scala runtime.  All these methods should be considered
@@ -54,7 +54,7 @@ object ScalaRunTime {
 
   /** Retrieve generic array element */
   def array_apply(xs: AnyRef, idx: Int): Any = {
-    xs match {
+    (xs: @unchecked) match {
       case x: Array[AnyRef]  => x(idx).asInstanceOf[Any]
       case x: Array[Int]     => x(idx).asInstanceOf[Any]
       case x: Array[Double]  => x(idx).asInstanceOf[Any]
@@ -64,14 +64,13 @@ object ScalaRunTime {
       case x: Array[Byte]    => x(idx).asInstanceOf[Any]
       case x: Array[Short]   => x(idx).asInstanceOf[Any]
       case x: Array[Boolean] => x(idx).asInstanceOf[Any]
-      case x: Array[Unit]    => x(idx).asInstanceOf[Any]
       case null => throw new NullPointerException
     }
   }
 
   /** update generic array element */
   def array_update(xs: AnyRef, idx: Int, value: Any): Unit = {
-    xs match {
+    (xs: @unchecked) match {
       case x: Array[AnyRef]  => x(idx) = value.asInstanceOf[AnyRef]
       case x: Array[Int]     => x(idx) = value.asInstanceOf[Int]
       case x: Array[Double]  => x(idx) = value.asInstanceOf[Double]
@@ -81,7 +80,6 @@ object ScalaRunTime {
       case x: Array[Byte]    => x(idx) = value.asInstanceOf[Byte]
       case x: Array[Short]   => x(idx) = value.asInstanceOf[Short]
       case x: Array[Boolean] => x(idx) = value.asInstanceOf[Boolean]
-      case x: Array[Unit]    => x(idx) = value.asInstanceOf[Unit]
       case null => throw new NullPointerException
     }
   }
@@ -91,7 +89,7 @@ object ScalaRunTime {
 
   // TODO: bytecode Object.clone() will in fact work here and avoids
   // the type switch. See Array_clone comment in BCodeBodyBuilder.
-  def array_clone(xs: AnyRef): AnyRef = xs match {
+  def array_clone(xs: AnyRef): AnyRef = (xs: @unchecked) match {
     case x: Array[AnyRef]  => x.clone()
     case x: Array[Int]     => x.clone()
     case x: Array[Double]  => x.clone()
@@ -108,24 +106,46 @@ object ScalaRunTime {
    *  Needed to deal with vararg arguments of primitive types that are passed
    *  to a generic Java vararg parameter T ...
    */
-  def toObjectArray(src: AnyRef): Array[Object] = src match {
-    case x: Array[AnyRef] => x
-    case _ =>
-      val length = array_length(src)
-      val dest = new Array[Object](length)
-      for (i <- 0 until length)
-        array_update(dest, i, array_apply(src, i))
-      dest
+  def toObjectArray(src: AnyRef): Array[Object] = {
+    def copy[@specialized T <: AnyVal](src: Array[T]): Array[Object] = {
+      val length = src.length
+      if (length == 0) Array.emptyObjectArray
+      else {
+        val dest = new Array[Object](length)
+        var i = 0
+        while (i < length) {
+          dest(i) = src(i).asInstanceOf[AnyRef]
+          i += 1
+        }
+        dest
+      }
+    }
+    (src: @unchecked) match {
+      case x: Array[AnyRef]  => x
+      case x: Array[Int]     => copy(x)
+      case x: Array[Double]  => copy(x)
+      case x: Array[Long]    => copy(x)
+      case x: Array[Float]   => copy(x)
+      case x: Array[Char]    => copy(x)
+      case x: Array[Byte]    => copy(x)
+      case x: Array[Short]   => copy(x)
+      case x: Array[Boolean] => copy(x)
+      case null => throw new NullPointerException
+    }
   }
 
   def toArray[T](xs: scala.collection.Seq[T]) = {
-    val arr = new Array[AnyRef](xs.length)
-    var i = 0
-    for (x <- xs) {
-      arr(i) = x.asInstanceOf[AnyRef]
-      i += 1
+    if (xs.isEmpty) Array.emptyObjectArray
+    else {
+      val arr = new Array[AnyRef](xs.length)
+      val it = xs.iterator
+      var i = 0
+      while (it.hasNext) {
+        arr(i) = it.next().asInstanceOf[AnyRef]
+        i += 1
+      }
+      arr
     }
-    arr
   }
 
   // Java bug: https://bugs.java.com/view_bug.do?bug_id=4071957
@@ -216,7 +236,7 @@ object ScalaRunTime {
     // Special casing Unit arrays, the value class which uses a reference array type.
     def arrayToString(x: AnyRef) = {
       if (x.getClass.getComponentType == classOf[BoxedUnit])
-        0 until (array_length(x) min maxElements) map (_ => "()") mkString ("Array(", ", ", ")")
+        (0 until min(array_length(x), maxElements)).map(_ => "()").mkString("Array(", ", ", ")")
       else
         x.asInstanceOf[Array[_]].iterator.take(maxElements).map(inner).mkString("Array(", ", ", ")")
     }
@@ -231,10 +251,10 @@ object ScalaRunTime {
       case x: String                    => if (x.head.isWhitespace || x.last.isWhitespace) "\"" + x + "\"" else x
       case x if useOwnToString(x)       => x.toString
       case x: AnyRef if isArray(x)      => arrayToString(x)
-      case x: scala.collection.Map[_, _] => x.iterator take maxElements map mapInner mkString (x.collectionClassName + "(", ", ", ")")
-      case x: Iterable[_]               => x.iterator take maxElements map inner mkString (x.collectionClassName + "(", ", ", ")")
+      case x: scala.collection.Map[_, _] => x.iterator.take(maxElements).map(mapInner).mkString(x.collectionClassName + "(", ", ", ")")
+      case x: Iterable[_]               => x.iterator.take(maxElements).map(inner).mkString(x.collectionClassName + "(", ", ", ")")
       case x: Product1[_] if isTuple(x) => "(" + inner(x._1) + ",)" // that special trailing comma
-      case x: Product if isTuple(x)     => x.productIterator map inner mkString ("(", ",", ")")
+      case x: Product if isTuple(x)     => x.productIterator.map(inner).mkString("(", ",", ")")
       case x                            => x.toString
     }
 

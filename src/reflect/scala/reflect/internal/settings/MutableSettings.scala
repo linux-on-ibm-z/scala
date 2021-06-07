@@ -16,6 +16,8 @@ package scala
 package reflect.internal
 package settings
 
+import scala.reflect.internal.util.StatisticsStatics
+
 /** A mutable Settings object.
  */
 abstract class MutableSettings extends AbsSettings {
@@ -44,6 +46,7 @@ abstract class MutableSettings extends AbsSettings {
     def valueSetByUser: Option[T] = if (isSetByUser) Some(value) else None
   }
 
+  def async: BooleanSetting
   def XnoPatmatAnalysis: BooleanSetting
   def Xprintpos: BooleanSetting
   def Yposdebug: BooleanSetting
@@ -62,13 +65,17 @@ abstract class MutableSettings extends AbsSettings {
   def YstatisticsEnabled: BooleanSetting
 
   def Yrecursion: IntSetting
-
-  def isScala212: Boolean
-  private[scala] def isScala213: Boolean
 }
 
 object MutableSettings {
   import scala.language.implicitConversions
   /** Support the common use case, `if (settings.debug) println("Hello, martin.")` */
   @inline implicit def reflectSettingToBoolean(s: MutableSettings#BooleanSetting): Boolean = s.value
+
+  implicit class SettingsOps(private val settings: MutableSettings) extends AnyVal {
+    @inline final def areStatisticsEnabled = (StatisticsStatics.COLD_STATS_GETTER.invokeExact(): Boolean) && settings.YstatisticsEnabled
+    @inline final def areHotStatisticsEnabled = (StatisticsStatics.HOT_STATS_GETTER.invokeExact(): Boolean) && settings.YhotStatisticsEnabled
+    @inline final def isDebug: Boolean     = (StatisticsStatics.DEBUG_GETTER.invokeExact(): Boolean) && settings.debug
+    @inline final def isDeveloper: Boolean = (StatisticsStatics.DEVELOPER_GETTER.invokeExact(): Boolean) && settings.developer
+  }
 }

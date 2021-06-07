@@ -227,8 +227,14 @@ object Map extends MapFactory[Map] {
     def get(key: Any): Option[Nothing] = None
     override def getOrElse [V1](key: Any, default: => V1): V1 = default
     def iterator: Iterator[(Any, Nothing)] = Iterator.empty
+    override def keysIterator: Iterator[Any] = Iterator.empty
+    override def valuesIterator: Iterator[Nothing] = Iterator.empty
     def updated [V1] (key: Any, value: V1): Map[Any, V1] = new Map1(key, value)
     def removed(key: Any): Map[Any, Nothing] = this
+    override def concat[V2 >: Nothing](suffix: IterableOnce[(Any, V2)]): Map[Any, V2] = suffix match {
+      case m: immutable.Map[Any, V2] => m
+      case _ => super.concat(suffix)
+    }
   }
 
   @SerialVersionUID(3L)
@@ -253,6 +259,10 @@ object Map extends MapFactory[Map] {
     override def foreach[U](f: ((K, V)) => U): Unit = {
       f((key1, value1))
     }
+    override def exists(p: ((K, V)) => Boolean): Boolean = p((key1, value1))
+    override def forall(p: ((K, V)) => Boolean): Boolean = p((key1, value1))
+    override protected[collection] def filterImpl(pred: ((K, V)) => Boolean, isFlipped: Boolean): Map[K, V] =
+      if (pred((key1, value1)) != isFlipped) this else Map.empty
     override def transform[W](f: (K, V) => W): Map[K, W] = {
       val walue1 = f(key1, value1)
       if (walue1.asInstanceOf[AnyRef] eq value1.asInstanceOf[AnyRef]) this.asInstanceOf[Map[K, W]]
@@ -317,6 +327,7 @@ object Map extends MapFactory[Map] {
         i += 1
         result
       }
+      override def drop(n: Int): Iterator[A] = { i += n; this }
       protected def nextResult(k: K, v: V @uncheckedVariance): A
     }
     def updated[V1 >: V](key: K, value: V1): Map[K, V1] =
@@ -329,6 +340,21 @@ object Map extends MapFactory[Map] {
       else this
     override def foreach[U](f: ((K, V)) => U): Unit = {
       f((key1, value1)); f((key2, value2))
+    }
+    override def exists(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) || p((key2, value2))
+    override def forall(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) && p((key2, value2))
+    override protected[collection] def filterImpl(pred: ((K, V)) => Boolean, isFlipped: Boolean): Map[K, V] = {
+      var k1 = null.asInstanceOf[K]
+      var v1 = null.asInstanceOf[V]
+      var n = 0
+      if (pred((key1, value1)) != isFlipped) {             {k1 = key1; v1 = value1}; n += 1}
+      if (pred((key2, value2)) != isFlipped) { if (n == 0) {k1 = key2; v1 = value2}; n += 1}
+
+      n match {
+        case 0 => Map.empty
+        case 1 => new Map1(k1, v1)
+        case 2 => this
+      }
     }
     override def transform[W](f: (K, V) => W): Map[K, W] = {
       val walue1 = f(key1, value1)
@@ -405,6 +431,7 @@ object Map extends MapFactory[Map] {
         i += 1
         result
       }
+      override def drop(n: Int): Iterator[A] = { i += n; this }
       protected def nextResult(k: K, v: V @uncheckedVariance): A
     }
     def updated[V1 >: V](key: K, value: V1): Map[K, V1] =
@@ -419,6 +446,23 @@ object Map extends MapFactory[Map] {
       else this
     override def foreach[U](f: ((K, V)) => U): Unit = {
       f((key1, value1)); f((key2, value2)); f((key3, value3))
+    }
+    override def exists(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) || p((key2, value2)) || p((key3, value3))
+    override def forall(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) && p((key2, value2)) && p((key3, value3))
+    override protected[collection] def filterImpl(pred: ((K, V)) => Boolean, isFlipped: Boolean): Map[K, V] = {
+      var k1, k2 = null.asInstanceOf[K]
+      var v1, v2 = null.asInstanceOf[V]
+      var n = 0
+      if (pred((key1, value1)) != isFlipped) {             { k1 = key1; v1 = value1 };                                             n += 1}
+      if (pred((key2, value2)) != isFlipped) { if (n == 0) { k1 = key2; v1 = value2 } else             { k2 = key2; v2 = value2 }; n += 1}
+      if (pred((key3, value3)) != isFlipped) { if (n == 0) { k1 = key3; v1 = value3 } else if (n == 1) { k2 = key3; v2 = value3 }; n += 1}
+
+      n match {
+        case 0 => Map.empty
+        case 1 => new Map1(k1, v1)
+        case 2 => new Map2(k1, v1, k2, v2)
+        case 3 => this
+      }
     }
     override def transform[W](f: (K, V) => W): Map[K, W] = {
       val walue1 = f(key1, value1)
@@ -508,6 +552,7 @@ object Map extends MapFactory[Map] {
         i += 1
         result
       }
+      override def drop(n: Int): Iterator[A] = { i += n; this }
       protected def nextResult(k: K, v: V @uncheckedVariance): A
     }
     def updated[V1 >: V](key: K, value: V1): Map[K, V1] =
@@ -524,6 +569,25 @@ object Map extends MapFactory[Map] {
       else this
     override def foreach[U](f: ((K, V)) => U): Unit = {
       f((key1, value1)); f((key2, value2)); f((key3, value3)); f((key4, value4))
+    }
+    override def exists(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) || p((key2, value2)) || p((key3, value3)) || p((key4, value4))
+    override def forall(p: ((K, V)) => Boolean): Boolean = p((key1, value1)) && p((key2, value2)) && p((key3, value3)) && p((key4, value4))
+    override protected[collection] def filterImpl(pred: ((K, V)) => Boolean, isFlipped: Boolean): Map[K, V] = {
+      var k1, k2, k3 = null.asInstanceOf[K]
+      var v1, v2, v3 = null.asInstanceOf[V]
+      var n = 0
+      if (pred((key1, value1)) != isFlipped) {             { k1 = key1; v1 = value1 };                                                                                         n += 1}
+      if (pred((key2, value2)) != isFlipped) { if (n == 0) { k1 = key2; v1 = value2 } else             { k2 = key2; v2 = value2 };                                             n += 1}
+      if (pred((key3, value3)) != isFlipped) { if (n == 0) { k1 = key3; v1 = value3 } else if (n == 1) { k2 = key3; v2 = value3 } else             { k3 = key3; v3 = value3};  n += 1}
+      if (pred((key4, value4)) != isFlipped) { if (n == 0) { k1 = key4; v1 = value4 } else if (n == 1) { k2 = key4; v2 = value4 } else if (n == 2) { k3 = key4; v3 = value4 }; n += 1}
+
+      n match {
+        case 0 => Map.empty
+        case 1 => new Map1(k1, v1)
+        case 2 => new Map2(k1, v1, k2, v2)
+        case 3 => new Map3(k1, v1, k2, v2, k3, v3)
+        case 4 => this
+      }
     }
     override def transform[W](f: (K, V) => W): Map[K, W] = {
       val walue1 = f(key1, value1)

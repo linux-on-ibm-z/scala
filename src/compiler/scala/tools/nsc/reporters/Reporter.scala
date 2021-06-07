@@ -60,20 +60,31 @@ object Reporter {
     loader.create[FilteringReporter](settings.reporter.value, settings.errorFn)(settings)
   }
 
-  /** Take the message with its explanation, if it has one. */
-  def explanation(msg: String): String = splitting(msg, explaining = true)
-
-  /** Take the message without its explanation, if it has one. */
-  def stripExplanation(msg: String): String = splitting(msg, explaining = false)
-
-  /** Split a message into a prefix and an optional explanation that follows a line starting with `"----"`. */
-  private def splitting(msg: String, explaining: Boolean): String =
-    if (msg != null && msg.indexOf("\n----") > 0) {
-      val (err, exp) = msg.linesIterator.span(!_.startsWith("----"))
-      if (explaining) (err ++ exp.drop(1)).mkString("\n") else err.mkString("\n")
-    } else {
+  /** Take the message with its explanation, if it has one, but stripping the separator line.
+   */
+  def explanation(msg: String): String =
+    if (msg == null) {
       msg
+    } else {
+      val marker = msg.indexOf("\n----\n")
+      if (marker > 0) msg.substring(0, marker + 1) + msg.substring(marker + 6) else msg
     }
+
+  /** Drop any explanation from the message, including the newline between the message and separator line.
+   */
+  def stripExplanation(msg: String): String =
+    if (msg == null) {
+      msg
+    } else {
+      val marker = msg.indexOf("\n----\n")
+      if (marker > 0) msg.substring(0, marker) else msg
+    }
+
+  /** Split the message into main message and explanation, as iterators of the text. */
+  def splitExplanation(msg: String): (Iterator[String], Iterator[String]) = {
+    val (err, exp) = msg.linesIterator.span(!_.startsWith("----"))
+    (err, exp.drop(1))
+  }
 }
 
 /** The reporter used in a Global instance.
@@ -98,19 +109,20 @@ abstract class FilteringReporter extends Reporter {
   private def maxErrors: Int = settings.maxerrs.value
   private def maxWarnings: Int = settings.maxwarns.value
 
-  private def noWarnings: Boolean = settings.nowarn.value
-
   override def filter(pos: Position, msg: String, severity: Severity): Int = {
+    import internal.Reporter.{ERROR => Error, WARNING => Warning, _}
     def maxOk = severity match {
-      case internal.Reporter.ERROR   => maxErrors < 0 || errorCount < maxErrors
-      case internal.Reporter.WARNING => !noWarnings && (maxWarnings < 0 || warningCount < maxWarnings)
-      case _ => true
+      case Error   => maxErrors < 0   || errorCount < maxErrors
+      case Warning => maxWarnings < 0 || warningCount < maxWarnings
+      case _       => true
     }
-    if (!duplicateOk(pos, severity, msg)) {
-      notifySuppressed(pos, msg, severity)
-      2 // don't count, don't display
-    } else if (!maxOk) 1 // count, but don't display
-      else 0
+    // Invoked when an error or warning is filtered by position.
+    @inline def suppress = {
+      if (settings.prompt) doReport(pos, msg, severity)
+      else if (settings.isDebug) doReport(pos, s"[ suppressed ] $msg", severity)
+      Suppress
+    }
+    if (!duplicateOk(pos, severity, msg)) suppress else if (!maxOk) Count else Display
   }
 
   /** Returns `true` if the message should be reported. Messages are skipped if:
@@ -138,12 +150,6 @@ abstract class FilteringReporter extends Reporter {
       }
       show
     }
-  }
-
-  /* Invoked when an error or warning is filtered by position. */
-  private def notifySuppressed(pos: Position, msg: String, severity: Severity): Unit = {
-    if (settings.prompt) doReport(pos, msg, severity)
-    else if (settings.debug) doReport(pos, "[ suppressed ] " + msg, severity)
   }
 
   override def reset(): Unit = {

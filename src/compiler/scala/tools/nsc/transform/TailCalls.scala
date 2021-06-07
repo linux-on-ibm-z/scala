@@ -29,20 +29,10 @@ abstract class TailCalls extends Transform {
 
   val phaseName: String = "tailcalls"
 
-  def newTransformer(unit: CompilationUnit): Transformer =
+  override def enabled = settings.debuginfo.value != "notailcalls"
+
+  def newTransformer(unit: CompilationUnit): AstTransformer =
     new TailCallElimination(unit)
-
-  /** Create a new phase which applies transformer */
-  override def newPhase(prev: scala.tools.nsc.Phase): StdPhase = new Phase(prev)
-
-  /** The phase defined by this transform */
-  class Phase(prev: scala.tools.nsc.Phase) extends StdPhase(prev) {
-    def apply(unit: global.CompilationUnit): Unit = {
-      if (!(settings.debuginfo.value == "notailcalls")) {
-        newTransformer(unit).transformUnit(unit)
-      }
-    }
-  }
 
   import treeInfo.hasSynthCaseSymbol
 
@@ -94,7 +84,7 @@ abstract class TailCalls extends Transform {
    *            parameter lists exist.
    * </p>
    */
-  class TailCallElimination(unit: CompilationUnit) extends Transformer {
+  class TailCallElimination(unit: CompilationUnit) extends AstTransformer {
     private def defaultReason = "it contains a recursive call not in tail position"
     private val failPositions = perRunCaches.newMap[TailContext, Position]() withDefault (_.methodPos)
     private val failReasons   = perRunCaches.newMap[TailContext, String]() withDefaultValue defaultReason
@@ -174,7 +164,7 @@ abstract class TailCalls extends Transform {
         val thisParam = method.newSyntheticValueParam(currentClass.typeOfThis)
         label setInfo MethodType(thisParam :: method.tpe.params, method.tpe_*.finalResultType)
         if (isEligible)
-          label substInfo (method.tpe.typeParams, tparams)
+          label.substInfo(method.tpe.typeParams, tparams)
 
         label
       }

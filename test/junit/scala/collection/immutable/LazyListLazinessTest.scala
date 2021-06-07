@@ -1,13 +1,10 @@
 package scala.collection.immutable
 
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 import org.junit.Test
 import org.junit.Assert._
 
 import scala.collection.{IterableOnce, Iterator, SeqFactory}
 
-@RunWith(classOf[JUnit4])
 class LazyListLazinessTest {
   import LazyListLazinessTest._
 
@@ -76,13 +73,9 @@ class LazyListLazinessTest {
   }
 
   private def genericFilter_properlyLazy(filter: (LazyList[Int], Int => Boolean) => LazyList[Int],
-                                 isFlipped: Boolean): Unit = {
-    val ops: OpProfileMap = Map(
-      lazyListOp(_.filter(_ => true))  -> NoDrops,
-      lazyListOp(_.filter(i => (i % 2 != 0) == isFlipped)) -> DropProfile(dropCount = 1, repeatedDrops = true),
-    )
-
-    for (op -> d <- ops) genericLazyOp_properlyLazy(op, d)
+                                         isFlipped: Boolean): Unit = {
+    genericLazyOp_properlyLazy(filter(_, _ => !isFlipped))
+    genericLazyOp_properlyLazy(filter(_, i => (i % 2 != 0) == isFlipped), DropProfile(dropCount = 1, repeatedDrops = true))
   }
 
   @Test
@@ -132,12 +125,8 @@ class LazyListLazinessTest {
 
   @Test
   def collect_properlyLazy(): Unit = {
-    val ops: OpProfileMap = Map(
-      lazyListOp(_ collect { case i => i })  -> NoDrops,
-      lazyListOp(_ collect { case i if i % 2 != 0 => i }) -> DropProfile(dropCount = 1, repeatedDrops = true),
-    )
-
-    for (op -> d <- ops) genericLazyOp_properlyLazy(op, d)
+    genericLazyOp_properlyLazy(_ collect { case i => i })
+    genericLazyOp_properlyLazy(_ collect { case i if i % 2 != 0 => i }, DropProfile(dropCount = 1, repeatedDrops = true))
   }
 
   @Test
@@ -216,7 +205,7 @@ class LazyListLazinessTest {
   }
 
   @Test
-  def lazyAppendedAll_appendedAll_properlyLazy(): Unit = {
+  def lazyAppendedAll_properlyLazy(): Unit = {
     genericAppendedColl_properlyLazy(_ lazyAppendedAll _)
   }
 
@@ -232,6 +221,7 @@ class LazyListLazinessTest {
     genericAppendedCollValue_properlyLazy(_ ++ _)
   }
 
+  @deprecated("Uses deprecated union", since="2.13.0")
   @Test
   def union_properlyLazy(): Unit = {
     genericAppendedCollValue_properlyLazy(_ union _)
@@ -326,14 +316,8 @@ class LazyListLazinessTest {
   @Test
   def splitAt_properlyLazy(): Unit = {
     val split = lazyListOp(_ splitAt 4)
-    val ops: OpProfileMap = Map(
-      split.andThen(_._1) -> NoDrops,
-      split.andThen(_._2) -> DropProfile(dropCount = 4, repeatedDrops = false),
-    )
-
-    for (op -> d <- ops) {
-      genericLazyOp_properlyLazy(op, d)
-    }
+    genericLazyOp_properlyLazy(split.andThen(_._1))
+    genericLazyOp_properlyLazy(split.andThen(_._2), DropProfile(dropCount = 4, repeatedDrops = false))
   }
 
   @Test
@@ -606,14 +590,9 @@ class LazyListLazinessTest {
     val span = lazyListOp(_.span(_ < 4))
     val op1 = span.andThen(_._1)
     val op2 = span.andThen(_._2)
-    val ops: OpProfileMap = Map(
-      op1 -> NoDrops,
-      op2 -> DropProfile(dropCount = 4, repeatedDrops = false),
-    )
 
-    for (op -> d <- ops) {
-      genericLazyOp_properlyLazy(op, d)
-    }
+    genericLazyOp_properlyLazy(op1)
+    genericLazyOp_properlyLazy(op2, DropProfile(dropCount = 4, repeatedDrops = false))
 
     assertLazyAllSkipping(op1.thenForce, 5)
     genericLazyOp_properlyLazy(op2.andThen(_.drop(1)), DropProfile(dropCount = 5, repeatedDrops = false))
@@ -714,6 +693,20 @@ class LazyListLazinessTest {
     assertLazyAllSkipping(op, 4)
   }
 
+  private def genericCons_unapply_properlyLazy(unapply: LazyList[Int] => Option[(Int, LazyList[Int])]): Unit = {
+    assertLazyAllSkipping(unapply, 1)
+  }
+
+  @Test
+  def cons_unapply_properlyLazy(): Unit = {
+    genericCons_unapply_properlyLazy(LazyList.cons.unapply)
+  }
+
+  @Test
+  def `#::_unapply_properlyLazy`(): Unit = {
+    genericCons_unapply_properlyLazy(LazyList.#::.unapply)
+  }
+
   /* factory laziness tests */
 
   @Test
@@ -736,7 +729,7 @@ class LazyListLazinessTest {
         if (i >= LazinessChecker.count) None
         else {
           init.evaluate(i)
-          Some(i, i + 1)
+          Some((i, i + 1))
         }
       }
     }
@@ -767,23 +760,45 @@ class LazyListLazinessTest {
     assertRepeatedlyLazy(factory)
   }
 
-  @Test
-  def `#:: properlyLazy`(): Unit = {
-    val factory = lazyListFactory { init =>
+  private def genericCons_properlyLazy(cons: (=> Int, => LazyList[Int]) => LazyList[Int]): Unit = {
+    val headInitFactory = lazyListFactory { init =>
       def gen(index: Int): LazyList[Int] = {
         def elem(): Int = { init.evaluate(index); index }
         if (index >= LazinessChecker.count) LazyList.empty
-        else elem() #:: gen(index + 1)
+        else cons(elem(), gen(index + 1))
       }
 
       gen(0)
     }
-    assertRepeatedlyLazy(factory)
+    assertRepeatedlyLazy(headInitFactory)
+
+    val tailInitFactory = lazyListFactory { init =>
+      def gen(index: Int): LazyList[Int] = {
+        if (index >= LazinessChecker.count) LazyList.empty
+        else {
+          init.evaluate(index)
+          cons(index, gen(index + 1))
+        }
+      }
+
+      LazyList.empty lazyAppendedAll gen(0) // prevent initial state evaluation
+    }
+    assertRepeatedlyLazy(tailInitFactory)
   }
 
   @Test
-  def `#::: properlyLazy`(): Unit = {
-    val factory = lazyListFactory { init =>
+  def cons_properlyLazy(): Unit = {
+    genericCons_properlyLazy(LazyList.cons(_, _))
+  }
+
+  @Test
+  def `#::_properlyLazy`(): Unit = {
+    genericCons_properlyLazy(_ #:: _)
+  }
+
+  @Test
+  def `#:::_properlyLazy`(): Unit = {
+    val headInitFactory = lazyListFactory { init =>
       def gen(index: Int): LazyList[Int] = {
         def elem(): LazyList[Int] = LazyList.fill(1) { init.evaluate(index); index }
         if (index >= LazinessChecker.count) LazyList.empty
@@ -792,7 +807,20 @@ class LazyListLazinessTest {
 
       gen(0)
     }
-    assertRepeatedlyLazy(factory)
+    assertRepeatedlyLazy(headInitFactory)
+
+    val tailInitFactory = lazyListFactory { init =>
+      def gen(index: Int): LazyList[Int] = {
+        if (index >= LazinessChecker.count) LazyList.empty
+        else {
+          init.evaluate(index)
+          LazyList.fill(1)(index) #::: gen(index + 1)
+        }
+      }
+
+      LazyList.empty lazyAppendedAll gen(0) // prevent initial state evaluation
+    }
+    assertRepeatedlyLazy(tailInitFactory)
   }
 
   @Test
@@ -853,7 +881,7 @@ class LazyListLazinessTest {
     }
     object CustomLong {
       import scala.language.implicitConversions
-      implicit def long2CustomInt(long: Long): CustomLong = CustomLong(long)
+      implicit def long2CustomLong(long: Long): CustomLong = CustomLong(long)
 
       implicit val customIntegralIsIntegral: Integral[CustomLong] = new Integral[CustomLong] {
         private val I = Integral[Long]
@@ -874,8 +902,15 @@ class LazyListLazinessTest {
       }
     }
 
-    LazyList.range(0, 1000)
-    assert(counter < 10)
+    def checkRange(ll: => LazyList[CustomLong]): Unit = {
+      counter = 0
+      ll
+      assert(counter < 10)
+    }
+
+    checkRange(LazyList.range(CustomLong(0), CustomLong(1000)))
+    checkRange(LazyList.range(CustomLong(0), CustomLong(1000), CustomLong(2)))
+    checkRange(LazyList.range(CustomLong(0), CustomLong(1000), CustomLong(-2)))
   }
 
   @Test
@@ -1007,7 +1042,6 @@ private object LazyListLazinessTest {
 
   type LazyListOp[U] = LazyList[Int] => U
   type LazyListToLazyListOp = LazyListOp[LazyList[Int]]
-  type OpProfileMap = Map[LazyListToLazyListOp, DropProfile]
 
   implicit final class RichLazyListToLazyListOp(private val self: LazyListToLazyListOp) extends AnyVal {
     def thenForce: LazyListToLazyListOp = self.andThen(_.force)

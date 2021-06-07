@@ -1,12 +1,17 @@
 package scala.collection.immutable
 
-import org.junit.Assert.{assertEquals, assertSame}
-import org.junit.Test
+import java.util.Collections
+
+import org.junit.Assert._
+import org.junit.{Ignore, Test}
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
+import scala.tools.testkit.AllocationTest
+import scala.tools.testkit.AssertUtil.assertThrows
+
 @RunWith(classOf[JUnit4])
-class HashMapTest {
+class HashMapTest extends AllocationTest{
 
   @Test
   def canMergeIdenticalHashMaps(): Unit = {
@@ -42,11 +47,11 @@ class HashMapTest {
   }
 
   @Test
-  def testWithDefaultValue: Unit = {
+  def testWithDefaultValue(): Unit = {
     val m1 = HashMap(1 -> "a", 2 -> "b")
-    val m2 = m1.withDefaultValue(0)
+    val m2 = m1.withDefaultValue("missing")
     assertEquals("a", m2(1))
-    assertEquals(0, m2(3))
+    assertEquals("missing", m2(3))
   }
 
   @Test
@@ -58,7 +63,7 @@ class HashMapTest {
   }
 
   @Test
-  def testGetOrElse: Unit = {
+  def testGetOrElse(): Unit = {
     val m1 = HashMap(1 -> "a", 2 -> "b")
     assertEquals("a", m1.getOrElse(1, ???))
     assertEquals("c", m1.getOrElse(3, "c"))
@@ -73,7 +78,7 @@ class HashMapTest {
   }
 
   @Test
-  def testWithDefault: Unit = {
+  def testWithDefault(): Unit = {
     val m1 = HashMap(1 -> "a", 2 -> "b")
 
     val m2: Map[Int, String] =
@@ -99,7 +104,7 @@ class HashMapTest {
   }
 
   @Test
-  def canMergeHashMapCollision1WithCorrectMerge() {
+  def canMergeHashMapCollision1WithCorrectMerge(): Unit = {
     case class A(k: Int) { override def hashCode = 0 }
     val m1 = HashMap(A(0) -> 2, A(1) -> 2)
     val m2 = HashMap(A(0) -> 1, A(1) -> 1)
@@ -109,7 +114,7 @@ class HashMapTest {
   }
 
   @Test
-  def transformReturnsOriginalMap() {
+  def transformReturnsOriginalMap(): Unit = {
     case class A(i: Int, j: Int) { override def hashCode = j }
 
     val hashMap = HashMap(
@@ -142,4 +147,203 @@ class HashMapTest {
     assertEquals(HashMap(1 -> 1, 3 -> 3, 4 -> 4), HashMap(1 -> 1, 2 -> 2).merged(HashMap(2 -> 2, 3 -> 3))((_,_) => 4 -> 4))
   }
 
+  def generate(): HashMap[String, String] = {
+    HashMap.from((1 to 1000).map { i => s"key $i" -> s"value $i" })
+  }
+  @Test
+  def nonAllocatingIdentical(): Unit = {
+    val base = generate()
+    assertTrue(nonAllocating {
+      base == base
+    })
+  }
+
+  @Test
+  def nonAllocatingNotShared(): Unit = {
+    val base = generate()
+    val notShared = generate()
+
+    assertTrue(nonAllocating {
+      base == notShared
+    })
+    assertTrue(nonAllocating {
+      notShared == base
+    })
+  }
+  @Test
+  def nonAllocatingShared(): Unit = {
+    val base = generate()
+    val shared = (base - base.head._1) + base.head
+
+    assertTrue(nonAllocating {
+      base == shared
+    })
+    assertTrue(nonAllocating {
+      shared == base
+    })
+  }
+
+  private val transformTestCases: List[HashMap[String, String]] = List(
+    HashMap("a" -> "b"),
+    HashMap("a" -> "b", "b" -> "c"),
+    HashMap("a" -> "b", "b" -> "c", "c" -> "d"),
+    HashMap("Ea" -> "FB", "FB" -> "Ea", "xyz" -> "xyz")
+  )
+
+  @Test
+  def transform(): Unit = {
+    def check(hm: HashMap[String, String]): Unit = {
+      val hm1 = hm transform ((k, v) => s"$k, $v")
+      assert(hm.size == hm1.size, (hm, hm1))
+      assert(hm.map { case (k, v) => k -> s"$k, $v" }.toSet == hm1.toSet, (hm, hm1))
+    }
+    transformTestCases foreach check
+  }
+
+  @Test
+  def addEmptyAllocations(): Unit = {
+    val nonEmpty = HashMap("a" -> 1,
+      "b" -> 2,
+      "c" -> 3,
+      "d" -> 4,
+      "e" -> 5,
+      "f" -> 6,
+      "g" -> 7,
+      "h" -> 8,
+      "i" -> 9,
+      "j" -> 10
+    )
+    assertSame(nonEmpty, nonAllocating(nonEmpty ++ HashMap.empty))
+    assertSame(nonEmpty, nonAllocating(nonEmpty ++ Map.empty))
+    assertSame(nonEmpty, nonAllocating(HashMap.empty ++ nonEmpty))
+    assertSame(nonEmpty, nonAllocating(Map.empty.concat(nonEmpty)))
+  }
+
+  @Test
+  def addSharedAllocations1(): Unit = {
+    val nonEmpty1 = HashMap("a" -> 1,
+      "b" -> 2,
+      "c" -> 3,
+      "d" -> 4,
+      "e" -> 5,
+      "f" -> 6,
+      "g" -> 7,
+      "h" -> 8,
+      "i" -> 9,
+      "j" -> 10
+    )
+    assertSame(nonEmpty1, nonAllocating(nonEmpty1 ++ nonEmpty1))
+
+  }
+
+  @Test
+  @Ignore // TODO Port {HashMap, HashSet}.concat allocation reduction
+  def addSharedAllocations2(): Unit = {
+    val nonEmpty1 = HashMap("a" -> 1,
+      "b" -> 2,
+      "c" -> 3,
+      "d" -> 4,
+      "e" -> 5,
+      "f" -> 6,
+      "g" -> 7,
+      "h" -> 8,
+      "i" -> 9,
+      "j" -> 10
+    )
+    assertSame(nonEmpty1, nonAllocating(nonEmpty1 ++ nonEmpty1))
+
+     val nonEmpty2 = nonEmpty1 - "a"
+     val nonEmpty3 = nonEmpty1 + ("k" -> 11)
+     assertSame(nonEmpty1, nonAllocating(nonEmpty1 ++ nonEmpty2))
+     assertSame(nonEmpty3, nonAllocating(nonEmpty1 ++ nonEmpty3))
+  }
+
+  @Test
+  @Ignore // TODO Port {HashMap, HashSet}.concat allocation reduction
+  def addCollidingAllocations(): Unit = {
+    val nonEmpty1 = HashMap("a" -> 1,
+      "b" -> 2,
+      "c" -> 3,
+      "d" -> 4,
+      "e" -> 5,
+      "f" -> 6,
+      "g" -> 7,
+      "h" -> 8,
+      "i" -> 9,
+      "j" -> 10
+    )
+    val nonEmpty2 = HashMap("a" -> 1,
+      "b" -> 2,
+      "c" -> 3,
+      "d" -> 4,
+      "e" -> 5,
+      "f" -> 6,
+      "g" -> 7,
+      "h" -> 8,
+      "i" -> 9,
+      "j" -> 10
+    )
+    assertSame(nonEmpty1, nonAllocating(nonEmpty1 ++ nonEmpty2))
+  }
+
+  @Test
+  def `++_1`(): Unit = {
+    val m1 = Map[Any, Int] (
+      1 -> 1,
+      2 -> 1,
+      3 -> 1,
+      4 -> 1,
+      5 -> 1
+      )
+    val m2 = Map[Int, Int] (2->2)
+    val m3: Iterable[(Any, Int)] = m2 ++ m1
+    assertEquals(1, Map.from(m3).apply(2))
+  }
+
+  @Test
+  def `++_2`(): Unit = {
+    val m1 = Map[Int, Int] (
+      1 -> 1,
+      2 -> 1,
+      3 -> 1,
+      4 -> 1,
+      5 -> 1
+      )
+    val m2 = Map[Int, Int] (2->2)
+    val m3 = m2 ++ m1
+    assertEquals(1, m3.apply(2))
+  }
+
+  @Test
+  def retainLeft(): Unit = {
+    case class C(a: Int)(override val toString: String)
+    implicit val ordering: Ordering[C] = Ordering.by(_.a)
+    val c0l = C(0)("l")
+    val c0r = C(0)("r")
+    def assertIdenticalKeys(expected: Map[C, Unit], actual: Map[C, Unit]): Unit = {
+      val expected1, actual1 = Collections.newSetFromMap[C](new java.util.IdentityHashMap())
+      expected.keys.foreach(expected1.add)
+      actual.keys.foreach(actual1.add)
+      assertEquals(expected1, actual1)
+    }
+    assertIdenticalKeys(Map((c0l, ())), HashMap((c0l, ())).updated(c0r, ()))
+
+    def check(factory: Seq[(C, Unit)] => Map[C, Unit]): Unit = {
+      val c0LMap = factory(Seq((c0l, ())))
+      val c0RMap = factory(Seq((c0r, ())))
+      assertIdenticalKeys(Map((c0l, ())), HashMap((c0l, ())).++(c0RMap))
+      assertIdenticalKeys(Map((c0l, ())), HashMap.newBuilder[C, Unit].++=(HashMap((c0l, ()))).++=(c0RMap).result())
+      assertIdenticalKeys(Map((c0l, ())), HashMap((c0l, ())).++(c0RMap))
+      assertIdenticalKeys(Map((c0l, ())), c0LMap ++ HashMap((c0r, ())))
+    }
+    check(cs => HashMap(cs: _*)) // exercise special case for HashMap/HashMap
+    check(cs => TreeMap(cs: _*)) // exercise special case for HashMap/HasForEachEntry
+    check(cs => HashMap(cs: _*).withDefault(_ => ???)) // default cases
+  }
+
+  @Test
+  def noSuchElement(): Unit = {
+    assertThrows[NoSuchElementException](HashMap(1->1)(2), _ == "key not found: 2")
+    assertThrows[NoSuchElementException](HashMap.empty(3), _ == "key not found: 3")
+  }
 }

@@ -7,7 +7,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree.ClassNode
 import scala.tools.nsc.backend.jvm.AsmUtils._
@@ -129,8 +129,8 @@ class MethodLevelOptsTest extends BytecodeTesting {
         |    a = "met"     // since it's an ASTORE to a live variable, cannot elim the store (scala/bug#5313), but store null instead.
         |                  // so we get `LDC met; POP; ACONST_NULL; ASTORE 1`. the `LDC met; POP` is eliminated by push-pop.
         |    a = "zit"     // this store is live, so we get `LDC zit; ASOTRE 1; ALOAD 1; ARETURN`.
-        |                  // we cannot eliminated the store-load sequence, because the local is live (again scala/bug#5313).
-        |    println()     // need a call instruction, otherwise trailing NULL stores are optimzied away
+        |                  // we cannot eliminate the store-load sequence, because the local is live (again scala/bug#5313).
+        |    println()     // need a call instruction, otherwise trailing NULL stores are optimized away
         |    a
         |  }
         |}
@@ -318,7 +318,7 @@ class MethodLevelOptsTest extends BytecodeTesting {
   def t5313(): Unit = {
     val code =
       """class C {
-        |  def randomBoolean = scala.util.Random.nextInt % 2 == 0
+        |  def randomBoolean = scala.util.Random.nextInt() % 2 == 0
         |
         |  // 3 stores to kept1 (slot 1), 1 store to result (slot 2)
         |  def t1 = {
@@ -430,7 +430,7 @@ class MethodLevelOptsTest extends BytecodeTesting {
         |    println(y)
         |  }
         |
-        |  def f = nextInt
+        |  def f = nextInt()
         |
         |  def t4 = {
         |    val x = f
@@ -439,11 +439,11 @@ class MethodLevelOptsTest extends BytecodeTesting {
         |  }
         |
         |  def t5 = {
-        |    var x = nextInt
+        |    var x = nextInt()
         |    var y = x
         |    println(y)
         |
-        |    y = nextInt
+        |    y = nextInt()
         |    x = y
         |    println(x)
         |  }
@@ -455,7 +455,7 @@ class MethodLevelOptsTest extends BytecodeTesting {
 
     assertEquals(locals(c, "t2"), List(("this", 0), ("x", 1)))
     // we don't have constant propagation (yet).
-    // the local var can't be optimized as a store;laod sequence, there's a GETSTATIC between the two
+    // the local var can't be optimized as a store;load sequence, there's a GETSTATIC between the two
     assertSameSummary(getMethod(c, "t2"), List(
       ICONST_2, ISTORE, GETSTATIC, ILOAD, "boxToInteger", "println", RETURN))
 

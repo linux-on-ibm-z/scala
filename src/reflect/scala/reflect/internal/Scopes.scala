@@ -17,7 +17,7 @@ package internal
 import scala.annotation.tailrec
 import scala.collection.{AbstractIterable, AbstractIterator}
 import scala.collection.mutable.Clearable
-import scala.reflect.internal.util.{Statistics, StatisticsStatics}
+import scala.reflect.internal.util.Statistics
 
 trait Scopes extends api.Scopes { self: SymbolTable =>
 
@@ -36,7 +36,7 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
   case class LookupInaccessible(symbol: Symbol, msg: String) extends NameLookup
   case object LookupNotFound extends NameLookup { def symbol = NoSymbol }
 
-  class ScopeEntry(val sym: Symbol, val owner: Scope) {
+  class ScopeEntry(var sym: Symbol, val owner: Scope) {
     /** the next entry in the hash bucket
      */
     var tail: ScopeEntry = null
@@ -68,8 +68,8 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
     private[this] var elem: ScopeEntry = owner.elems
 
     def hasNext: Boolean = (elem ne null) && (elem.owner == this.owner)
-    def next: Symbol =
-      if (hasNext){
+    def next(): Symbol =
+      if (hasNext) {
         val res = elem
         elem = elem.next
         res.sym
@@ -155,6 +155,23 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
      */
     def enter[T <: Symbol](sym: T): T = {
       enterEntry(newScopeEntry(sym, this))
+      sym
+    }
+
+    final def enterBefore(sym: Symbol, next: ScopeEntry): Symbol = {
+      assert(this != EmptyScope, sym)
+      require(sym.name.hashCode() == next.sym.name.hashCode(), (sym, next.sym))
+      require(sym != next.sym, (sym, next.sym))
+
+      val newNext = new ScopeEntry(next.sym, this)
+      val hasHashTable = hashtable ne null
+
+      newNext.next = next.next
+      if (hasHashTable) newNext.tail = next.tail
+      next.sym = sym
+      next.next = newNext
+      if (hasHashTable) next.tail = newNext
+      flushElemsCache()
       sym
     }
 
@@ -330,7 +347,6 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
      *  change to use iterators as too costly.
      */
     def lookupEntry(name: Name): ScopeEntry = {
-      val startTime = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.scopeLookupTime) else null
       var e: ScopeEntry = null
       val flat = phase.flatClasses
       if (hashtable ne null) {
@@ -344,7 +360,6 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
           e = e.next
         }
       }
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.scopeLookupTime, startTime)
       e
     }
 
@@ -500,22 +515,22 @@ trait Scopes extends api.Scopes { self: SymbolTable =>
 
   /** Create a new scope nested in another one with which it shares its elements */
   final def newNestedScope(outer: Scope): Scope = {
-    val startTime = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.scopePopulationTime) else null
+    val startTime = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.scopePopulationTime) else null
     val nested = newScope // not `new Scope`, we must allow the runtime reflection universe to mixin SynchronizedScopes!
     nested.elems = outer.elems
     nested.nestinglevel = outer.nestinglevel + 1
     if (outer.hashtable ne null)
       nested.hashtable = java.util.Arrays.copyOf(outer.hashtable, outer.hashtable.length)
-    if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.scopePopulationTime, startTime)
+    if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.scopePopulationTime, startTime)
     nested
   }
 
   /** Create a new scope with given initial elements */
   def newScopeWith(elems: Symbol*): Scope = {
-    val startTime = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.scopePopulationTime) else null
+    val startTime = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.scopePopulationTime) else null
     val scope = newScope
     elems foreach scope.enter
-    if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.scopePopulationTime, startTime)
+    if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.scopePopulationTime, startTime)
     scope
   }
 
@@ -547,5 +562,4 @@ trait ScopeStats {
   self: Statistics =>
   val scopeCountView = newView("#created scopes")(symbolTable.scopeCount)
   val scopePopulationTime = newTimer("time spent in scope population")
-  val scopeLookupTime = newTimer("time spent in scope lookup")
 }

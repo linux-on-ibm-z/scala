@@ -13,17 +13,16 @@
 package scala.tools.nsc.transform.patmat
 
 import scala.annotation.tailrec
-import scala.tools.nsc.symtab.Flags.{MUTABLE, STABLE}
 import scala.collection.mutable
-import scala.reflect.internal.util.Position
+import scala.tools.nsc.symtab.Flags.{MUTABLE, STABLE}
+import scala.tools.nsc.Reporting.WarningCategory
 
 /** Optimize and analyze matches based on their TreeMaker-representation.
  *
  * The patmat translation doesn't rely on this, so it could be disabled in principle.
  *  - well, not quite: the backend crashes if we emit duplicates in switches (e.g. scala/bug#7290)
  */
-// TODO: split out match analysis
-trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
+trait MatchOptimization extends MatchTreeMaking with MatchApproximation {
   import global._
   import global.definitions._
 
@@ -43,40 +42,46 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       val testss = approximateMatchConservative(prevBinder, cases)
 
       // interpret:
-      val dependencies = new mutable.LinkedHashMap[Test, Set[Prop]]
-      val tested = new mutable.HashSet[Prop]
+      val dependencies    = new mutable.LinkedHashMap[Test, mutable.LinkedHashSet[Prop]]
+      val tested          = new mutable.LinkedHashSet[Prop]
+      val reusesMap       = new mutable.LinkedHashMap[Int, Test]
+      val reusesTest      = { (test: Test) => reusesMap.get(test.id) }
+      val registerReuseBy = { (priorTest: Test, later: Test) =>
+        assert(!reusesMap.contains(later.id), reusesMap(later.id))
+        reusesMap(later.id) = priorTest
+      }
 
       // TODO: use SAT solver instead of hashconsing props and approximating implication by subset/equality
       def storeDependencies(test: Test) = {
         val cond = test.prop
 
         def simplify(c: Prop): Set[Prop] = c match {
-          case And(ops)                   => ops.toSet flatMap simplify
+          case And(ops)                   => ops flatMap simplify
           case Or(ops)                    => Set(False) // TODO: make more precise
-          case Not(Eq(Var(_), NullConst)) => Set(True) // not worth remembering
+          case Not(Eq(Var(_), NullConst)) => Set.empty  // not worth remembering
+          case True                       => Set.empty  // same
           case _                          => Set(c)
         }
         val conds = simplify(cond)
 
         if (conds(False)) false // stop when we encounter a definite "no" or a "not sure"
         else {
-          val nonTrivial = conds - True
-          if (!nonTrivial.isEmpty) {
-            tested ++= nonTrivial
+          if (!conds.isEmpty) {
+            tested ++= conds
 
             // is there an earlier test that checks our condition and whose dependencies are implied by ours?
             dependencies find {
               case (priorTest, deps) =>
-                ((simplify(priorTest.prop) == nonTrivial) || // our conditions are implied by priorTest if it checks the same thing directly
-                 (nonTrivial subsetOf deps)                  // or if it depends on a superset of our conditions
-                ) && (deps subsetOf tested)                 // the conditions we've tested when we are here in the match satisfy the prior test, and hence what it tested
+                ((simplify(priorTest.prop) == conds) || // our conditions are implied by priorTest if it checks the same thing directly
+                    (conds subsetOf deps)               // or if it depends on a superset of our conditions
+                ) && (deps subsetOf tested)             // the conditions we've tested when we are here in the match satisfy the prior test, and hence what it tested
             } foreach {
               case (priorTest, _) =>
                 // if so, note the dependency in both tests
-                priorTest registerReuseBy test
+                registerReuseBy(priorTest, test)
             }
 
-            dependencies(test) = tested.toSet // copies
+            dependencies(test) = tested.clone()
           }
           true
         }
@@ -102,10 +107,10 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       val collapsed = testss map { tests =>
         // map tests to the equivalent list of treemakers, replacing shared prefixes by a reusing treemaker
         // if there's no sharing, simply map to the tree makers corresponding to the tests
-        var currDeps = Set[Prop]()
+        var currDeps = mutable.LinkedHashSet.empty[Prop]
         val (sharedPrefix, suffix) = tests span { test =>
           (test.prop == True) || (for(
-              reusedTest <- test.reuses;
+              reusedTest <- reusesTest(test);
               nextDeps <- dependencies.get(reusedTest);
               diff <- (nextDeps diff currDeps).headOption;
               _ <- Some({ currDeps = nextDeps }))
@@ -115,7 +120,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         val collapsedTreeMakers =
           if (sharedPrefix.isEmpty) None
           else { // even sharing prefixes of length 1 brings some benefit (overhead-percentage for compiler: 26->24%, lib: 19->16%)
-            for (test <- sharedPrefix; reusedTest <- test.reuses) reusedTest.treeMaker match {
+            for (test <- sharedPrefix; reusedTest <- reusesTest(test)) reusedTest.treeMaker match {
               case reusedCTM: CondTreeMaker => reused(reusedCTM) = ReusedCondTreeMaker(reusedCTM, selectorPos)
               case _ =>
             }
@@ -126,8 +131,8 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
             // and the last of such interesting shared conditions reuses another treemaker's test
             // replace the whole sharedPrefix by a ReusingCondTreeMaker
             for (lastShared <- sharedPrefix.reverse.dropWhile(_.prop == True).headOption;
-                 lastReused <- lastShared.reuses)
-              yield ReusingCondTreeMaker(sharedPrefix, reusedOrOrig) :: suffix.map(_.treeMaker)
+                 lastReused <- reusesTest(lastShared))
+              yield ReusingCondTreeMaker(sharedPrefix, reusesTest, reusedOrOrig) :: suffix.map(_.treeMaker)
           }
 
         collapsedTreeMakers getOrElse tests.map(_.treeMaker) // sharedPrefix need not be empty (but it only contains True-tests, which are dropped above)
@@ -154,13 +159,13 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       }
 
       // TODO: finer-grained duplication
-      def chainBefore(next: Tree)(casegen: Casegen): Tree = // assert(codegen eq optimizedCodegen)
-        atPos(pos)(casegen.asInstanceOf[optimizedCodegen.OptimizedCasegen].flatMapCondStored(cond, storedCond, res, nextBinder, substitution(next).duplicate))
+      def chainBefore(next: Tree)(casegen: Casegen): Tree =
+        atPos(pos)(casegen.flatMapCondStored(cond, storedCond, res, nextBinder, substitution(next).duplicate))
 
       override def toString = "Memo"+((nextBinder.name, storedCond.name, cond, res, substitution))
     }
 
-    case class ReusingCondTreeMaker(sharedPrefix: List[Test], toReused: TreeMaker => TreeMaker) extends TreeMaker { import CODE._
+    case class ReusingCondTreeMaker(sharedPrefix: List[Test], reusesTest: Test => Option[Test], toReused: TreeMaker => TreeMaker) extends TreeMaker { import CODE._
       val pos = sharedPrefix.last.treeMaker.pos
 
       lazy val localSubstitution = {
@@ -168,7 +173,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         var mostRecentReusedMaker: ReusedCondTreeMaker = null
         def mapToStored(droppedBinder: Symbol) = if (mostRecentReusedMaker eq null) Nil else List((droppedBinder, REF(mostRecentReusedMaker.nextBinder)))
         val (from, to) = sharedPrefix.flatMap { dropped =>
-          dropped.reuses.map(test => toReused(test.treeMaker)).foreach {
+          reusesTest(dropped).map(test => toReused(test.treeMaker)).foreach {
             case reusedMaker: ReusedCondTreeMaker =>
               mostRecentReusedMaker = reusedMaker
             case _ =>
@@ -189,7 +194,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         collapsedDroppedSubst.foldLeft(rerouteToReusedBinders)(_ >> _)
       }
 
-      lazy val lastReusedTreeMaker = sharedPrefix.reverse.flatMap(tm => tm.reuses map (test => toReused(test.treeMaker))).collectFirst{case x: ReusedCondTreeMaker => x}.head
+      lazy val lastReusedTreeMaker = sharedPrefix.reverse.flatMap(tm => reusesTest(tm) map (test => toReused(test.treeMaker))).collectFirst{case x: ReusedCondTreeMaker => x}.head
 
       def chainBefore(next: Tree)(casegen: Casegen): Tree = {
         // TODO: finer-grained duplication -- MUST duplicate though, or we'll get VerifyErrors since sharing trees confuses lambdalift,
@@ -200,20 +205,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
     }
   }
 
-
-  //// DCE
-//  trait DeadCodeElimination extends TreeMakers {
-//    // TODO: non-trivial dead-code elimination
-//    // e.g., the following match should compile to a simple instanceof:
-//    //   case class Ident(name: String)
-//    //   for (Ident(name) <- ts) println(name)
-//    def doDCE(prevBinder: Symbol, cases: List[List[TreeMaker]], pt: Type): List[List[TreeMaker]] = {
-//      // do minimal DCE
-//      cases
-//    }
-//  }
-
-  //// SWITCHES -- TODO: operate on Tests rather than TreeMakers
+  //// SWITCHES
   trait SwitchEmission extends TreeMakers with MatchMonadInterface {
     import treeInfo.isGuardedCase
 
@@ -289,16 +281,17 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
             if (isDefault || !canJump) defaultBody
             else Apply(Ident(defaultLabel), Nil)
 
-          val guardedBody = same.foldRight(jumpToDefault){
+          val guardedBody = same.foldRight(jumpToDefault) {
             // the last case may be unguarded (we know it's the last one since fold's accum == jumpToDefault)
             // --> replace jumpToDefault by the unguarded case's body
-            case (CaseDef(_, EmptyTree, b), `jumpToDefault`)     => b
-            case (cd@CaseDef(_, g, b), els) if isGuardedCase(cd) => If(g, b, els)
+            case (CaseDef(_, EmptyTree, b), `jumpToDefault`)       => b
+            case (cd @ CaseDef(_, g, b), els) if isGuardedCase(cd) => If(g, b, els)
+            case x                                                 => throw new MatchError(x)
           }
 
           // if the cases that we're going to collapse bind variables,
           // must replace them by the single binder introduced by the collapsed case
-          val binders = same.collect{case CaseDef(x@Bind(_, _), _, _) if x.symbol != NoSymbol => x.symbol}
+          val binders = same.collect { case CaseDef(x @ Bind(_, _), _, _) if x.symbol != NoSymbol => x.symbol }
           val (pat, guardedBodySubst) =
             if (binders.isEmpty) (commonPattern, guardedBody)
             else {
@@ -450,7 +443,9 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
                   val distinctAlts = distinctBy(switchableAlts)(extractConst)
                   if (distinctAlts.size < switchableAlts.size) {
                     val duplicated = switchableAlts.groupBy(extractConst).flatMap(_._2.drop(1).take(1)) // report the first duplicated
-                    reporter.warning(pos, s"Pattern contains duplicate alternatives: ${duplicated.mkString(", ")}")
+                    typer.context.warning(pos,
+                      s"Pattern contains duplicate alternatives: ${duplicated.mkString(", ")}",
+                      WarningCategory.OtherMatchAnalysis)
                   }
                   CaseDef(Alternative(distinctAlts), guard, body)
                 }
@@ -518,7 +513,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         case _ => None
       }}
 
-      def scrutRef(scrut: Symbol): Tree = dealiasWiden(scrut.tpe) match {
+      def scrutRef(scrut: Symbol): Tree = scrut.tpe.dealiasWiden match {
         case subInt if subInt =:= IntTpe =>
           REF(scrut)
         case subInt if definitions.isNumericSubClass(subInt.typeSymbol, IntClass) =>
@@ -548,7 +543,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
     override def emitSwitch(scrut: Tree, scrutSym: Symbol, cases: List[List[TreeMaker]], pt: Type, matchFailGenOverride: Option[Tree => Tree], unchecked: Boolean): Option[Tree] = { import CODE._
       val regularSwitchMaker = new RegularSwitchMaker(scrutSym, matchFailGenOverride, unchecked)
       // TODO: if patterns allow switch but the type of the scrutinee doesn't, cast (type-test) the scrutinee to the corresponding switchable type and switch on the result
-      if (regularSwitchMaker.switchableTpe(dealiasWiden(scrutSym.tpe))) {
+      if (regularSwitchMaker.switchableTpe(scrutSym.tpe.dealiasWiden)) {
         val caseDefsWithDefault = regularSwitchMaker(cases map {c => (scrutSym, c)}, pt)
         if (caseDefsWithDefault.isEmpty) None // not worth emitting a switch.
         else {
@@ -606,13 +601,8 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
                           with SwitchEmission
                           with CommonSubconditionElimination {
     override def optimizeCases(prevBinder: Symbol, cases: List[List[TreeMaker]], pt: Type, selectorPos: Position): (List[List[TreeMaker]], List[Tree]) = {
-      // TODO: do CSE on result of doDCE(prevBinder, cases, pt)
       val optCases = doCSE(prevBinder, cases, pt, selectorPos)
-      val toHoist = (
-        for (treeMakers <- optCases)
-          yield treeMakers.collect{case tm: ReusedCondTreeMaker => tm.treesToHoist}
-        ).flatten.flatten.toList
-      (optCases, toHoist)
+      (optCases, optCases.flatMap(flatCollect(_) { case tm: ReusedCondTreeMaker => tm.treesToHoist }))
     }
   }
 }

@@ -15,7 +15,7 @@ package typechecker
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
-
+import scala.tools.nsc.Reporting.WarningCategory
 import symtab.Flags._
 
 /** Synthetic method implementations for case classes and case objects.
@@ -122,7 +122,7 @@ trait SyntheticMethods extends ast.TreeDSL {
       )
     }
 
-    def perElementMethod(name: Name, returnType: Type)(caseFn: Symbol => Tree): Tree =
+    def perElementMethod(name: Name, returnType: Type)(caseFn: Symbol => Tree): Tree = 
       createSwitchMethod(name, accessors.indices, returnType)(idx => caseFn(accessors(idx)))
 
     def productElementNameMethod = {
@@ -179,7 +179,7 @@ trait SyntheticMethods extends ast.TreeDSL {
      * - asInstanceOf if no equality checks need made (see scala/bug#9240, scala/bug#10361)
      */
     def equalsCore(eqmeth: Symbol, accessors: List[Symbol]) = {
-      val otherName = freshTermName(clazz.name + "$")(freshNameCreatorFor(context))
+      val otherName = freshTermName(clazz.name.toStringWithSuffix("$"))(freshNameCreatorFor(context))
       val otherSym  = eqmeth.newValue(otherName, eqmeth.pos, SYNTHETIC) setInfo clazz.tpe
       val pairwise  = {
         //compare primitive fields first, slow equality checks of non-primitive fields can be skipped when primitives differ
@@ -191,11 +191,10 @@ trait SyntheticMethods extends ast.TreeDSL {
           if (usefulEquals) {
             val thisAcc  = Select(mkThis, acc)
             val otherAcc = Select(Ident(otherSym), acc)
-            val op       = acc.tpe.member(nme.EQ)
             if (isPrimitiveValueType(resultType))
-              prims += fn(thisAcc, op, otherAcc)
+              prims += fn(thisAcc, acc.tpe.member(nme.EQ), otherAcc)
             else
-              refs  += fn(thisAcc, op, otherAcc)   //gen.mkCast(otherAcc, AnyTpe)
+              refs  += fn(thisAcc, Any_==, otherAcc)
           }
         }
         prims.prependToList(refs.toList)      // (prims ++ refs).toList
@@ -252,7 +251,7 @@ trait SyntheticMethods extends ast.TreeDSL {
     /* The _1, _2, etc. methods to implement ProductN, disabled
      * until we figure out how to introduce ProductN without cycles.
      */
-    /****
+    /*
     def productNMethods = {
       val accs = accessors.toIndexedSeq
       1 to arity map (num => productProj(arity, num) -> (() => projectionMethod(accs(num - 1), num)))
@@ -260,7 +259,7 @@ trait SyntheticMethods extends ast.TreeDSL {
     def projectionMethod(accessor: Symbol, num: Int) = {
       createMethod(nme.productAccessorName(num), accessor.tpe.resultType)(_ => REF(accessor))
     }
-    ****/
+    */
 
     // methods for both classes and objects
     def productMethods: List[(Symbol, () => Tree)] = {
@@ -386,7 +385,7 @@ trait SyntheticMethods extends ast.TreeDSL {
               // Without a means to suppress this warning, I've thought better of it.
               if (settings.warnValueOverrides) {
                  (clazz.info nonPrivateMember m.name) filter (m => (m.owner != AnyClass) && (m.owner != clazz) && !m.isDeferred) andAlso { m =>
-                   typer.context.warning(clazz.pos, s"Implementation of ${m.name} inherited from ${m.owner} overridden in $clazz to enforce value class semantics")
+                   typer.context.warning(clazz.pos, s"Implementation of ${m.name} inherited from ${m.owner} overridden in $clazz to enforce value class semantics", WarningCategory.Other /* settings.warnValueOverrides is not exposed as compiler flag */)
                  }
                }
               true
@@ -428,9 +427,9 @@ trait SyntheticMethods extends ast.TreeDSL {
         val i = original.owner.caseFieldAccessors.indexOf(original)
         def freshAccessorName = {
           devWarning(s"Unable to find $original among case accessors of ${original.owner}: ${original.owner.caseFieldAccessors}")
-          freshTermName(original.name + "$")(freshNameCreatorFor(context))
+          freshTermName(original.name.toStringWithSuffix("$"))(freshNameCreatorFor(context))
         }
-        def nameSuffixedByParamIndex = original.name.append(nme.CASE_ACCESSOR + "$" + i).toTermName
+        def nameSuffixedByParamIndex = original.name.append(s"${nme.CASE_ACCESSOR}$$${i}").toTermName
         val newName = if (i < 0) freshAccessorName else nameSuffixedByParamIndex
         val newAcc = deriveMethod(ddef.symbol, name => newName) { newAcc =>
           newAcc.makePublic

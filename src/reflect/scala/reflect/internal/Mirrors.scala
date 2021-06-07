@@ -51,7 +51,7 @@ trait Mirrors extends api.Mirrors {
       getModuleOrClass(path.toString, len, path.newName(_))
 
     private def getModuleOrClass(path: String, len: Int, toName: String => Name): Symbol = {
-      val point = path lastIndexOf ('.', len - 1)
+      val point = path.lastIndexOf('.', len - 1)
       val owner =
         if (point > 0) getModuleOrClass(path, point, newTermName(_))
         else RootClass
@@ -61,7 +61,7 @@ trait Mirrors extends api.Mirrors {
       val result = if (name.isTermName) sym.suchThat(_ hasFlag MODULE) else sym
       if (result != NoSymbol) result
       else {
-        if (settings.debug) { log(sym.info); log(sym.info.members) }//debug
+        if (settings.isDebug) { log(sym.info); log(sym.info.members) }//debug
         thisMirror.missingHook(owner, name) orElse {
           MissingRequirementError.notFound((if (name.isTermName) "object " else "class ")+path+" in "+thisMirror)
         }

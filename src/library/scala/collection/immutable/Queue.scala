@@ -27,7 +27,7 @@ import scala.collection.mutable.{Builder, ListBuffer}
   *  where a pivot is required, in which case, a cost of `O(n)` is incurred, where `n` is the number of elements in the queue. When this happens,
   *  `n` remove operations with `O(1)` cost are guaranteed. Removing an item is on average `O(1)`.
   *
-  *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#immutable-queues "Scala's Collection Library overview"]]
+  *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#immutable-queues "Scala's Collection Library overview"]]
   *  section on `Immutable Queues` for more information.
   *
   *  @define Coll `immutable.Queue`
@@ -52,7 +52,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
     *
     *  @param  n index of the element to return
     *  @return   the element at position `n` in this queue.
-    *  @throws java.util.NoSuchElementException if the queue is too short.
+    *  @throws NoSuchElementException if the queue is too short.
     */
   override def apply(n: Int): A = {
     def indexOutOfRange(): Nothing = throw new IndexOutOfBoundsException(n.toString)
@@ -96,6 +96,11 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
     if (out.nonEmpty) new Queue(in, out.tail)
     else if (in.nonEmpty) new Queue(Nil, in.reverse.tail)
     else throw new NoSuchElementException("tail on empty queue")
+
+  override def last: A =
+    if (in.nonEmpty) in.head
+    else if (out.nonEmpty) out.last
+    else throw new NoSuchElementException("last on empty queue")
 
   /* This is made to avoid inefficient implementation of iterator. */
   override def forall(p: A => Boolean): Boolean =
@@ -160,7 +165,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
   /** Returns a tuple with the first element in the queue,
     *  and a new queue with this element removed.
     *
-    *  @throws java.util.NoSuchElementException
+    *  @throws NoSuchElementException
     *  @return the first element of the queue.
     */
   def dequeue: (A, Queue[A]) = out match {
@@ -179,7 +184,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
   /** Returns the first element in the queue, or throws an error if there
     *  is no element contained in the queue.
     *
-    *  @throws java.util.NoSuchElementException
+    *  @throws NoSuchElementException
     *  @return the first element.
     */
   def front: A = head

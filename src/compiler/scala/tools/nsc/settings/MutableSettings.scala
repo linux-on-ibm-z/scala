@@ -16,7 +16,7 @@ package scala.tools
 package nsc
 package settings
 
-import io.{AbstractFile, Jar, Path, PlainFile, VirtualDirectory}
+import io.{AbstractFile, Path, PlainFile, VirtualDirectory}
 import scala.annotation.tailrec
 import scala.collection.mutable.Clearable
 import scala.io.Source
@@ -25,14 +25,15 @@ import scala.reflect.{ClassTag, classTag}
 
 /** A mutable Settings object.
  */
-class MutableSettings(val errorFn: String => Unit)
+class MutableSettings(val errorFn: String => Unit, val pathFactory: PathFactory)
               extends scala.reflect.internal.settings.MutableSettings
                  with AbsSettings
                  with ScalaSettings {
+  def this(errorFn: String => Unit) = this(errorFn, DefaultPathFactory)
   type ResultOfTryToSet = List[String]
 
   def withErrorFn(errorFn: String => Unit): MutableSettings = {
-    val settings = new MutableSettings(errorFn)
+    val settings = new MutableSettings(errorFn, pathFactory)
     copyInto(settings)
     settings
   }
@@ -68,27 +69,20 @@ class MutableSettings(val errorFn: String => Unit)
   def processArguments(arguments: List[String], processAll: Boolean): (Boolean, List[String]) = {
     @tailrec
     def loop(args: List[String], residualArgs: List[String]): (Boolean, List[String]) = args match {
-      case Nil        =>
-        (checkDependencies, residualArgs)
-      case "--" :: xs =>
-        (checkDependencies, xs)
+      case Nil                     => (checkDependencies, residualArgs)
+      case "--" :: xs              => (checkDependencies, xs)
       // discard empties, sometimes they appear because of ant or etc.
       // but discard carefully, because an empty string is valid as an argument
       // to an option, e.g. -cp "" .  So we discard them only when they appear
       // where an option should be, not where an argument to an option should be.
-      case "" :: xs =>
-        loop(xs, residualArgs)
-      case x :: xs  =>
-        if (x startsWith "-") {
-          parseParams(args) match {
-            case newArgs if newArgs eq args => errorFn(s"bad option: '$x'") ; (false, args)
-            case newArgs                    => loop(newArgs, residualArgs)
-          }
+      case "" :: xs                => loop(xs, residualArgs)
+      case (x @ Optionlike()) :: _ =>
+        parseParams(args) match {
+          case newArgs if newArgs eq args => errorFn(s"bad option: '$x'") ; (false, args)
+          case newArgs                    => loop(newArgs, residualArgs)
         }
-        else if (processAll)
-          loop(xs, residualArgs :+ x)
-        else
-          (checkDependencies, args)
+      case x :: xs if processAll   => loop(xs, residualArgs :+ x)
+      case _                       => (checkDependencies, args)
     }
     loop(arguments, Nil)
   }
@@ -102,11 +96,11 @@ class MutableSettings(val errorFn: String => Unit)
     s
   }
 
-  /** A list pairing source directories with their output directory.
-   *  This option is not available on the command line, but can be set by
-   *  other tools (IDEs especially). The command line specifies a single
-   *  output directory that is used for all source files, denoted by a
-   *  '*' in this list.
+  /** A list pairing source directories with their respective output directory.
+   *
+   *  Tools may set outputDirs programmatically.
+   *
+   *  The `-d` commandline option sets a single directory for all sources.
    */
   lazy val outputDirs = new OutputDirs
 
@@ -159,10 +153,9 @@ class MutableSettings(val errorFn: String => Unit)
       tryToSetIfExists(p, args, (s: Setting) => s.tryToSet(_))
 
     args match {
-      case Nil          => Nil
-      case "-" :: rest  => errorFn("'-' is not a valid argument.") ; args
-      case arg :: rest if !arg.startsWith("-") => errorFn(s"Argument '$arg' does not start with '-'.") ; args
-      case arg :: rest  =>
+      case Nil      => Nil
+      case "-" :: _ => errorFn("'-' is not a valid argument.") ; args
+      case (arg @ Optionlike()) :: rest  =>
         // we dispatch differently based on the appearance of p:
         // 1) If it matches a prefix setting it is sent there directly.
         // 2) If it has a : it is presumed to be -Xfoo:bar,baz
@@ -177,6 +170,7 @@ class MutableSettings(val errorFn: String => Unit)
           else parseNormalArg(arg, rest)
         }
         .getOrElse(args)
+      case arg :: _ => errorFn(s"Argument '$arg' does not start with '-'.") ; args
     }
   }
 
@@ -214,15 +208,16 @@ class MutableSettings(val errorFn: String => Unit)
     s
   }
 
-  def BooleanSetting(name: String, descr: String) = add(new BooleanSetting(name, descr))
+  def BooleanSetting(name: String, descr: String, default: Boolean = false) = add(new BooleanSetting(name, descr, default))
   def ChoiceSetting(name: String, helpArg: String, descr: String, choices: List[String], default: String, choicesHelp: List[String] = Nil) =
     add(new ChoiceSetting(name, helpArg, descr, choices, default, choicesHelp))
   def IntSetting(name: String, descr: String, default: Int, range: Option[(Int, Int)], parser: String => Option[Int]) =
     add(new IntSetting(name, descr, default, range, parser))
-  def MultiStringSetting(name: String, arg: String, descr: String, helpText: Option[String] = None) = add(new MultiStringSetting(name, arg, descr, helpText))
+  def MultiStringSetting(name: String, arg: String, descr: String, default: List[String] = Nil, helpText: Option[String] = None, prepend: Boolean = false) =
+    add(new MultiStringSetting(name, arg, descr, default, helpText, prepend))
   def MultiChoiceSetting[E <: MultiChoiceEnumeration](name: String, helpArg: String, descr: String, domain: E, default: Option[List[String]] = None) =
     add(new MultiChoiceSetting[E](name, helpArg, descr, domain, default))
-  def OutputSetting(outputDirs: OutputDirs, default: String) = add(new OutputSetting(outputDirs, default))
+  def OutputSetting(default: String) = add(new OutputSetting(default))
   def PhasesSetting(name: String, descr: String, default: String = "") = add(new PhasesSetting(name, descr, default))
   def StringSetting(name: String, arg: String, descr: String, default: String, helpText: Option[String] = None) = add(new StringSetting(name, arg, descr, default, helpText))
   def ScalaVersionSetting(name: String, arg: String, descr: String, initial: ScalaVersion, default: Option[ScalaVersion] = None) =
@@ -253,36 +248,36 @@ class MutableSettings(val errorFn: String => Unit)
     /** Add a destination directory for sources found under `srcDir`.
      *  Both directories should exist.
      */
-    def add(srcDir: String, outDir: String): Unit = // used in ide?
-      add(checkDir(AbstractFile.getDirectory(srcDir), srcDir),
-          checkDir(AbstractFile.getDirectory(outDir), outDir))
+    // used in ide?
+    def add(srcDir: String, outDir: String): Unit = {
+      // Check that dir exists and is a directory.
+      def checkDir(name: String): AbstractFile = {
+        val dir = pathFactory.getDirectory(name)
+        if (dir != null && dir.isDirectory) dir
+        else throw new FatalError(s"$name does not exist or is not a directory")
+      }
+      add(checkDir(srcDir), checkDir(outDir))
+    }
 
-    /** Check that dir is exists and is a directory. */
-    private def checkDir(dir: AbstractFile, name: String, allowJar: Boolean = false): AbstractFile = (
-      if (dir != null && dir.isDirectory)
-        dir
-      else if (allowJar && dir == null && Jar.isJarOrZip(name, examineFile = false))
-        new PlainFile(Path(name))
-      else
-        throw new FatalError(name + " does not exist or is not a directory")
-    )
+    /** Check either existing dir, or if not dir in path, a jar/zip which may not yet exist. */
+    private def checkDirOrJar(name: String): AbstractFile = {
+      val dir = pathFactory.getDirectory(name)
+      if (dir != null && dir.isDirectory) dir
+      else if (dir == null && Path.isExtensionJarOrZip(name)) new PlainFile(Path(name))
+      else throw new FatalError(s"$name does not exist or is not a directory")
+    }
 
     /** Set the single output directory. From now on, all files will
      *  be dumped in there, regardless of previous calls to 'add'.
      */
-    def setSingleOutput(outDir: String): Unit = {
-      val dst = AbstractFile.getDirectory(outDir)
-      setSingleOutput(checkDir(dst, outDir, allowJar = true))
-    }
+    def setSingleOutput(outDir: String): Unit = setSingleOutput(checkDirOrJar(outDir))
 
     def getSingleOutput: Option[AbstractFile] = singleOutDir
 
     /** Set the single output directory. From now on, all files will
      *  be dumped in there, regardless of previous calls to 'add'.
      */
-    def setSingleOutput(dir: AbstractFile): Unit = {
-      singleOutDir = Some(dir)
-    }
+    def setSingleOutput(dir: AbstractFile): Unit = singleOutDir = Some(dir)
 
     def add(src: AbstractFile, dst: AbstractFile): Unit = {
       singleOutDir = None
@@ -295,16 +290,12 @@ class MutableSettings(val errorFn: String => Unit)
     /** Return the output directory for the given file.
      */
     def outputDirFor(src: AbstractFile): AbstractFile = {
-      def isBelow(srcDir: AbstractFile, outDir: AbstractFile) =
-        src.path.startsWith(srcDir.path)
+      def isBelow(srcDir: AbstractFile, outDir: AbstractFile) = src.path.startsWith(srcDir.path)
 
       singleOutDir.getOrElse(outputs.find((isBelow _).tupled) match {
-          case Some((_, d)) => d
-          case _ =>
-            throw new FatalError("Could not find an output directory for "
-                                 + src.path + " in " + outputs)
-        }
-      )
+        case Some((_, d)) => d
+        case _ => throw new FatalError(s"Could not find an output directory for ${src.path} in ${outputs}")
+      })
     }
 
     /** Return the source file path(s) which correspond to the given
@@ -325,8 +316,7 @@ class MutableSettings(val errorFn: String => Unit)
      *  paths.
      */
     def srcFilesFor(classFile : AbstractFile, srcPath : String) : List[AbstractFile] = {
-      def isBelow(srcDir: AbstractFile, outDir: AbstractFile) =
-        classFile.path.startsWith(outDir.path)
+      def isBelow(srcDir: AbstractFile, outDir: AbstractFile) = classFile.path.startsWith(outDir.path)
 
       singleOutDir match {
         case Some(_: VirtualDirectory | _: io.ZipArchive) => Nil
@@ -344,6 +334,7 @@ class MutableSettings(val errorFn: String => Unit)
    *  Subclasses each define a `value` field of the appropriate type.
    */
   abstract class Setting(val name: String, val helpDescription: String) extends AbsSetting with SettingValue {
+
     /** Will be called after this Setting is set for any extra work. */
     private[this] var _postSetHook: this.type => Unit = (x: this.type) => ()
     override def postSetHook(): Unit = _postSetHook(this)
@@ -425,20 +416,16 @@ class MutableSettings(val errorFn: String => Unit)
     withHelpSyntax(s"$name <n>")
   }
 
-  /** A setting represented by a boolean flag (false, unless set) */
-  class BooleanSetting private[nsc](
-    name: String,
-    descr: String)
-  extends Setting(name, descr) {
+  /** A setting that is a boolean flag, with default as specified. */
+  class BooleanSetting private[nsc](name: String, descr: String, default: Boolean) extends Setting(name, s"$descr [$default]") {
     type T = Boolean
-    protected var v: Boolean = false
+    protected var v: Boolean = default
     override def value: Boolean = v
 
     def tryToSet(args: List[String]) = { value = true ; Some(args) }
     def unparse: List[String] = if (value) List(name) else Nil
-    override def tryToSetFromPropertyValue(s : String): Unit = { // used from ide
-      value = s.equalsIgnoreCase("true")
-    }
+    // used from ide
+    override def tryToSetFromPropertyValue(s : String): Unit = value = s.equalsIgnoreCase("true")
     override def tryToSetColon(args: List[String]) = args match {
       case Nil     => tryToSet(Nil)
       case List(x) =>
@@ -488,13 +475,9 @@ class MutableSettings(val errorFn: String => Unit)
     withHelpSyntax(name + " <" + arg + ">")
 
     def tryToSet(args: List[String]) = args match {
-      case Nil      => errorAndValue("missing argument", None)
-      case x :: xs  =>
-        if (helpText.nonEmpty && x == "help")
-          sawHelp = true
-        else
-          value = x
-        Some(xs)
+      case Nil | Optionlike() :: _             => errorAndValue(s"missing argument for $name", None)
+      case "help" :: rest if helpText.nonEmpty => sawHelp = true ; Some(rest)
+      case h :: rest                           => value = h ; Some(rest)
     }
     def unparse: List[String] = if (value == default) Nil else List(name, value)
 
@@ -556,18 +539,8 @@ class MutableSettings(val errorFn: String => Unit)
     )
   }
 
-  /** Set the output directory. */
-  class OutputSetting private[nsc](
-    private[nsc] val outputDirs: OutputDirs,
-    default: String)
-    extends StringSetting("-d", "directory|jar", "destination for generated classfiles.", default, None) {
-      value = default
-      override def value_=(str: String): Unit = {
-        super.value_=(str)
-        try outputDirs.setSingleOutput(str)
-        catch { case FatalError(msg) => errorFn(msg) }
-      }
-  }
+  /** Set the output directory for all sources. */
+  class OutputSetting private[nsc](default: String) extends StringSetting("-d", "directory|jar", "destination for generated classfiles.", default, None)
 
   /**
    * Each [[MultiChoiceSetting]] takes a MultiChoiceEnumeration as domain. The enumeration may
@@ -622,7 +595,7 @@ class MutableSettings(val errorFn: String => Unit)
     withHelpSyntax(s"$name:<${helpArg}s>")
 
     object ChoiceOrVal {
-      def unapply(a: domain.Value): Option[(String, String, List[domain.Choice])] = a match {
+      def unapply(a: domain.Value): Some[(String, String, List[domain.Choice])] = a match {
         case c: domain.Choice => Some((c.name, c.help, c.expandsTo))
         case v: domain.Value  => Some((v.toString, "", Nil))
       }
@@ -663,7 +636,7 @@ class MutableSettings(val errorFn: String => Unit)
         case _ => true
       }
 
-      /**
+      /*
        * Expand an expanding option, if necessary recursively. Expanding options are not included in
        * the result (consistent with "_", which is not in `value` either).
        *
@@ -781,28 +754,29 @@ class MutableSettings(val errorFn: String => Unit)
     name: String,
     val arg: String,
     descr: String,
-    helpText: Option[String])
+    default: List[String],
+    helpText: Option[String],
+    prepend: Boolean)
   extends Setting(name, descr) with Clearable {
     type T = List[String]
-    protected var v: T = Nil
+    protected var v: T = default
     protected var sawHelp: Boolean = false
 
     withHelpSyntax(name + ":<" + arg + ">")
 
-    // try to set. halting means halt at first non-arg
+    // try to set. halting means halt at first non-arg i.e. at next option
     protected def tryToSetArgs(args: List[String], halting: Boolean) = {
       @tailrec
-      def loop(args: List[String]): List[String] = args match {
-        case arg :: rest =>
-          if (halting && (arg startsWith "-")) args
-          else {
-            if (helpText.isDefined && arg == "help") sawHelp = true
-            else value ++= List(arg)
-            loop(rest)
-          }
-        case Nil         => Nil
+      def loop(seen: List[String], args: List[String]): (List[String], List[String]) = args match {
+        case Optionlike() :: _ if halting         => (seen, args)
+        case "help" :: rest if helpText.isDefined => sawHelp = true ; loop(seen, rest)
+        case arg :: rest                          => loop(arg :: seen, rest)
+        case Nil                                  => (seen, Nil)
       }
-      Some(loop(args))
+      val (seen, rest) = loop(Nil, args)
+      if (prepend) value = value.prependedAll(seen.reverse)
+      else value = value.appendedAll(seen.reverse)
+      Some(rest)
     }
     def tryToSet(args: List[String])                  = tryToSetArgs(args, halting = true)
     override def tryToSetColon(args: List[String])    = tryToSetArgs(args, halting = false)
@@ -828,8 +802,9 @@ class MutableSettings(val errorFn: String => Unit)
     val default: String,
     val choicesHelp: List[String])
   extends Setting(name,
-    if (choicesHelp.isEmpty) s"$descr ${choices.map(s => if (s == default) s"[$s]" else s).mkString("(", ",", ")")}"
-    else s"$descr Default: `$default`, `help` to list choices.") {
+      if (choicesHelp.isEmpty) s"$descr ${choices.map(s => if (s == default) s"[$s]" else s).mkString("(", ",", ")")}"
+      else s"$descr Default: `$default`, `help` to list choices."
+  ) {
     type T = String
     protected var v: T = default
     def indexOfChoice: Int = choices indexOf value
@@ -950,4 +925,8 @@ class MutableSettings(val errorFn: String => Unit)
   }
   import scala.language.implicitConversions
   protected implicit def installEnableSettings[T <: BooleanSetting](s: T): EnableSettings[T] = new EnableSettings(s)
+}
+
+private object Optionlike {
+  def unapply(s: String): Boolean = s.startsWith("-")
 }

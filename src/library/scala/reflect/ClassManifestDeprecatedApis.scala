@@ -13,9 +13,10 @@
 package scala
 package reflect
 
-import scala.collection.mutable.{ ArraySeq, ArrayBuilder }
+import scala.collection.mutable.{ArrayBuilder, ArraySeq}
 import java.lang.{Class => jClass}
-import scala.annotation.tailrec
+
+import scala.annotation.{nowarn, tailrec}
 
 @deprecated("use scala.reflect.ClassTag instead", "2.10.0")
 trait ClassManifestDeprecatedApis[T] extends OptManifest[T] {
@@ -151,6 +152,7 @@ trait ClassManifestDeprecatedApis[T] extends OptManifest[T] {
  *  so we need to somehow nudge them into migrating prior to removing stuff out of the blue.
  *  Hence we've introduced this design decision as the lesser of two evils.
  */
+@nowarn("""cat=deprecation&origin=scala\.reflect\.ClassManifest.*""")
 object ClassManifestFactory {
   val Byte    = ManifestFactory.Byte
   val Short   = ManifestFactory.Short
@@ -203,7 +205,7 @@ object ClassManifestFactory {
   def classType[T](prefix: OptManifest[_], clazz: jClass[_], args: OptManifest[_]*): ClassManifest[T] =
     new ClassTypeManifest[T](Some(prefix), clazz, args.toList)
 
-  def arrayType[T](arg: OptManifest[_]): ClassManifest[Array[T]] = arg match {
+  def arrayType[T](arg: OptManifest[_]): ClassManifest[Array[T]] = (arg: @unchecked) match {
     case NoManifest          => Object.asInstanceOf[ClassManifest[Array[T]]]
     case m: ClassManifest[_] => m.asInstanceOf[ClassManifest[T]].arrayManifest
   }
@@ -232,6 +234,7 @@ object ClassManifestFactory {
 
 /** Manifest for the class type `clazz[args]`, where `clazz` is
   * a top-level or static class */
+@nowarn("""cat=deprecation&origin=scala\.reflect\.ClassManifest""")
 @SerialVersionUID(1L)
 private class ClassTypeManifest[T](
   prefix: Option[OptManifest[_]],

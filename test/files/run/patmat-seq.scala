@@ -1,5 +1,4 @@
 import scala.tools.partest._
-import java.io.{Console => _, _}
 
 object Test extends DirectTest {
 
@@ -11,7 +10,7 @@ object Test extends DirectTest {
       |}
       |object B {
       |  // this works: Some and immutable collections support the required interface.
-      |  // in reqality, immutable collections also use the UnapplySeqWrapper value class, which is eliminated by erasure
+      |  // in reality, immutable collections also use the UnapplySeqWrapper value class, which is eliminated by erasure
       |  def unapplySeq(a: Int) = Some(collection.immutable.ArraySeq(1,2,3))
       |}
       |class Foo[T] {

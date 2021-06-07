@@ -1,11 +1,11 @@
 package scala.collection.mutable
 
 import scala.collection.immutable.List
-
 import org.junit.Test
 import org.junit.Assert._
 
-import scala.collection.{SeqFactory, mutable}
+import scala.annotation.nowarn
+import scala.collection.SeqFactory
 
 class ArrayDequeTest {
 
@@ -21,10 +21,10 @@ class ArrayDequeTest {
       assertEquals(buffer.reverse, buffer2.reverse)
     }
 
-    apply(_ += (1, 2, 3, 4, 5))
+    apply(_.+=(1, 2, 3, 4, 5)): @nowarn("cat=deprecation")
     apply(_.prepend(6).prepend(7).prepend(8))
-    apply(_.trimStart(2))
-    apply(_.trimEnd(3))
+    apply(_.dropInPlace(2))
+    apply(_.dropRightInPlace(3))
     apply(_.insert(2, -3))
     apply(_.insertAll(0, collection.Seq(9, 10, 11)))
     apply(_.insertAll(1, collection.Seq(12, 13)))
@@ -55,7 +55,7 @@ class ArrayDequeTest {
   }
 
   @Test
-  def queueBounds: Unit = {
+  def queueBounds(): Unit = {
     import scala.collection.mutable.Queue
 
     val xs = Queue.empty[Int]
@@ -69,20 +69,20 @@ class ArrayDequeTest {
   }
 
   @Test
-  def copyToArrayOutOfBounds: Unit = {
+  def copyToArrayOutOfBounds(): Unit = {
     val target = Array[Int]()
     assertEquals(0, collection.mutable.ArrayDeque(1, 2).copyToArray(target, 1, 0))
   }
 
   @Test
-  def insertsWhenResizeIsNeeded: Unit = {
+  def insertsWhenResizeIsNeeded(): Unit = {
     val arrayDeque = ArrayDeque.from(Array.range(0, 15))
     arrayDeque.insert(1, -1)
     assertEquals(ArrayDeque(0, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14), arrayDeque)
   }
 
   @Test
-  def insertAll: Unit = {
+  def insertAll(): Unit = {
     var a = ArrayDeque(0, 1)
     a.insertAll(1, Seq(2))
     assertEquals(ArrayDeque(0, 2, 1), a)
@@ -98,7 +98,7 @@ class ArrayDequeTest {
   }
 
   @Test
-  def sliding: Unit = ArrayDequeTest.genericSlidingTest(ArrayDeque, "ArrayDeque")
+  def sliding(): Unit = ArrayDequeTest.genericSlidingTest(ArrayDeque, "ArrayDeque")
 
 
   class PeekingArrayDeque[C] extends ArrayDeque[C] {
@@ -106,7 +106,7 @@ class ArrayDequeTest {
   }
 
   @Test
-  def trimToSize: Unit = {
+  def trimToSize(): Unit = {
     val a = new PeekingArrayDeque().addAll(0 to 255)
 
     a.trimToSize()  // Can't shrink

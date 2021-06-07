@@ -41,7 +41,10 @@ trait Validators {
       val effectiveOwner = if (isImplMethod) macroImplOwner else macroImplOwner.owner
       val effectivelyStatic = effectiveOwner.isStaticOwner || effectiveOwner.moduleClass.isStaticOwner
       val correctBundleness = if (isImplMethod) macroImplOwner.isModuleClass else macroImplOwner.isClass && !macroImplOwner.isModuleClass
-      if (!effectivelyStatic || !correctBundleness) MacroImplReferenceWrongShapeError()
+      if (!effectivelyStatic || !correctBundleness) {
+        val isReplClassBased = settings.Yreplclassbased.value && effectiveOwner.enclosingTopLevelClass.isInterpreterWrapper
+        MacroImplReferenceWrongShapeError(isReplClassBased)
+      }
     }
 
     private def checkMacroDefMacroImplCorrespondence() = {
@@ -76,7 +79,7 @@ trait Validators {
         val boundsOk = typer.silent(_.infer.checkBounds(macroDdef, NoPrefix, NoSymbol, atparams, atargs, ""))
         boundsOk match {
           case SilentResultValue(true) => // do nothing, success
-          case SilentResultValue(false) | SilentTypeError(_) => MacroImplTargMismatchError(atargs, atparams)
+          case SilentResultValue(false) | _: SilentTypeError => MacroImplTargMismatchError(atargs, atparams)
         }
       } catch {
         case ex: NoInstance => MacroImplTparamInstantiationError(atparams, ex)

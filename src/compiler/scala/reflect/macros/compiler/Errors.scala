@@ -45,7 +45,15 @@ trait Errors extends Traces {
     "macro implementation reference is ambiguous: makes sense both as\n"+
     "a macro bundle method reference and a vanilla object method reference")
 
-  def MacroBundleNonStaticError() = bundleRefError("macro bundles must be static")
+  private def replClassBasedMacroAddendum(isReplClassBased: Boolean): String =
+    if (isReplClassBased)
+      "\nnote: macro definition is not supported in the REPL when using -Yrepl-classbased, run :replay -Yrepl-class-based:false."
+    else ""
+
+
+  def MacroBundleNonStaticError(isReplClassBased: Boolean) = {
+    bundleRefError("macro bundles must be static" + replClassBasedMacroAddendum(isReplClassBased))
+  }
 
   def MacroBundleWrongShapeError() = bundleRefError("macro bundles must be concrete monomorphic classes having a single constructor with a `val c: Context` parameter")
 
@@ -54,10 +62,10 @@ trait Errors extends Traces {
 
     // sanity check errors
 
-    def MacroImplReferenceWrongShapeError() = implRefError(
+    def MacroImplReferenceWrongShapeError(isReplClassBased: Boolean = false) = implRefError(
       "macro implementation reference has wrong shape. required:\n"+
       "macro [<static object>].<method name>[[<type args>]] or\n" +
-      "macro [<macro bundle>].<method name>[[<type args>]]")
+      "macro [<macro bundle>].<method name>[[<type args>]]" + replClassBasedMacroAddendum(isReplClassBased))
 
     def MacroImplWrongNumberOfTypeArgumentsError() = {
       val diagnostic = if (macroImpl.typeParams.sizeCompare(targs) > 0) "has too few type arguments" else "has too many arguments"
@@ -92,7 +100,7 @@ trait Errors extends Traces {
 
     private def showMeth(pss: List[List[Symbol]], restpe: Type, abbreviate: Boolean, untype: Boolean) = {
       def preprocess(tpe: Type) = if (untype) untypeMetalevel(tpe) else tpe
-      var pssPart = (pss map (ps => ps map (p => p.defStringSeenAs(preprocess(p.info))) mkString ("(", ", ", ")"))).mkString
+      var pssPart = pss.map(_.map(p => p.defStringSeenAs(preprocess(p.info))).mkString("(", ", ", ")")).mkString
       if (abbreviate) pssPart = abbreviateCoreAliases(pssPart)
       var retPart = preprocess(restpe).toString
       if (abbreviate || macroDdef.tpt.tpe == null) retPart = abbreviateCoreAliases(retPart)

@@ -17,7 +17,6 @@ import scala.reflect.ClassTag
 import scala.collection.{immutable, mutable}
 import scala.annotation.tailrec
 import mutable.ListBuffer
-import java.util.NoSuchElementException
 import scala.runtime.Statics.releaseFence
 
 /** Profiler driven changes.
@@ -161,7 +160,7 @@ trait Collections {
       ys1 = ys1.tail
       ys2 = ys2.tail
     }
-    if (lb eq null) Nil else lb.result
+    if (lb eq null) Nil else lb.result()
   }
 
   // compare to foldLeft[A, B](xs)
@@ -319,14 +318,14 @@ trait Collections {
       private[this] var head: Option[C] = None
       private[this] def advanceHead(): Unit =
         while (head.isEmpty && itA.hasNext && itB.hasNext) {
-          val x = itA.next
-          val y = itB.next
+          val x = itA.next()
+          val y = itB.next()
           head = f(x, y)
         }
 
       def hasNext: Boolean = {
         advanceHead()
-        ! head.isEmpty
+        !head.isEmpty
       }
 
       def next(): C = {
@@ -440,6 +439,49 @@ trait Collections {
       these = these.tail
     }
   }
+
+  private val TupleOfNil = (Nil, Nil)
+  final def partitionConserve[A](as: List[A])(p: A => Boolean): (List[A], List[A]) = {
+    if (as.isEmpty) TupleOfNil
+    else {
+      var b0 = true
+      var canConserve = true
+      var ys = as
+      var ayes: ListBuffer[A] = null
+      var nays: ListBuffer[A] = null
+      var n = 0
+      while (!ys.isEmpty) {
+        val y = ys.head
+        val b = p(y)
+        if (canConserve) {
+          if (n == 0) b0 = b
+          else if (b != b0) {
+            canConserve = false
+            ayes = new ListBuffer[A]
+            nays = new ListBuffer[A]
+            val prefix = if (b0) ayes else nays
+            var j = 0
+            var zs = as
+            while (j < n) {
+              prefix += zs.head
+              zs = zs.tail
+              j += 1
+            }
+            (if (b) ayes else nays) += y
+          }
+          n += 1
+        } else {
+          (if (b) ayes else nays) += y
+        }
+        ys = ys.tail
+      }
+      if (canConserve)
+        if (b0) (as, Nil) else (Nil, as)
+      else
+        (ayes.toList, nays.toList)
+    }
+  }
+
 }
 
 object Collections extends Collections

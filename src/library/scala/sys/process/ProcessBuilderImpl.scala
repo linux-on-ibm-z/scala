@@ -16,9 +16,12 @@ package process
 
 import processInternal._
 import Process._
-import java.io.{ FileInputStream, FileOutputStream }
-import BasicIO.{ LazilyListed, Streamed, Uncloseable }
+import BasicIO.{LazilyListed, Streamed, Uncloseable}
 import Uncloseable.protect
+
+import java.io.{FileInputStream, FileOutputStream}
+import java.util.concurrent.LinkedBlockingQueue
+
 import scala.util.control.NonFatal
 
 private[process] trait ProcessBuilderImpl {
@@ -33,7 +36,7 @@ private[process] trait ProcessBuilderImpl {
     override def canPipeTo = true
   }
 
-  private[process] class URLInput(url: URL) extends IStreamBuilder(url.openStream, url.toString)
+  private[process] class URLInput(url: URL) extends IStreamBuilder(url.openStream(), url.toString)
   private[process] class FileInput(file: File) extends IStreamBuilder(new FileInputStream(file), file.getAbsolutePath)
   private[process] class FileOutput(file: File, append: Boolean) extends OStreamBuilder(new FileOutputStream(file, append), file.getAbsolutePath)
 
@@ -57,7 +60,7 @@ private[process] trait ProcessBuilderImpl {
   ) extends AbstractBuilder {
 
     override def run(io: ProcessIO): Process = {
-      val success = new SyncVar[Boolean]
+      val success = new LinkedBlockingQueue[Boolean](1)
       def go(): Unit = {
         var ok = false
         try {
@@ -85,10 +88,10 @@ private[process] trait ProcessBuilderImpl {
       val inThread =
         if (inherit || (writeInput eq BasicIO.connectNoOp)) null
         else Spawn("Simple-input", daemon = true)(writeInput(process.getOutputStream))
-      val outThread = Spawn("Simple-output", daemonizeThreads)(processOutput(process.getInputStream))
+      val outThread = Spawn("Simple-output", daemonizeThreads)(processOutput(process.getInputStream()))
       val errorThread =
         if (p.redirectErrorStream) Nil
-        else List(Spawn("Simple-error", daemonizeThreads)(processError(process.getErrorStream)))
+        else List(Spawn("Simple-error", daemonizeThreads)(processError(process.getErrorStream())))
 
       new SimpleProcess(process, inThread, outThread :: errorThread)
     }
@@ -129,14 +132,14 @@ private[process] trait ProcessBuilderImpl {
     def lazyLines_!(capacity: Integer) : LazyList[String]                    = lazyLines(withInput = false, nonZeroException = false, None, capacity)
     def lazyLines_!(log: ProcessLogger, capacity: Integer): LazyList[String] = lazyLines(withInput = false, nonZeroException = false, Some(log), capacity)
 
-    def lineStream: Stream[String]                       = lineStream(withInput = false, nonZeroException = true, None, defaultStreamCapacity)
-    def lineStream(log: ProcessLogger): Stream[String]   = lineStream(withInput = false, nonZeroException = true, Some(log), defaultStreamCapacity)
-    def lineStream_! : Stream[String]                    = lineStream(withInput = false, nonZeroException = false, None, defaultStreamCapacity)
-    def lineStream_!(log: ProcessLogger): Stream[String] = lineStream(withInput = false, nonZeroException = false, Some(log), defaultStreamCapacity)
-    def lineStream(capacity: Integer): Stream[String]                       = lineStream(withInput = false, nonZeroException = true, None, capacity)
-    def lineStream(log: ProcessLogger, capacity: Integer): Stream[String]   = lineStream(withInput = false, nonZeroException = true, Some(log), capacity)
-    def lineStream_!(capacity: Integer) : Stream[String]                    = lineStream(withInput = false, nonZeroException = false, None, capacity)
-    def lineStream_!(log: ProcessLogger, capacity: Integer): Stream[String] = lineStream(withInput = false, nonZeroException = false, Some(log), capacity)
+    @deprecated("internal", since = "2.13.4") def lineStream: Stream[String]                       = lineStream(withInput = false, nonZeroException = true, None, defaultStreamCapacity)
+    @deprecated("internal", since = "2.13.4") def lineStream(log: ProcessLogger): Stream[String]   = lineStream(withInput = false, nonZeroException = true, Some(log), defaultStreamCapacity)
+    @deprecated("internal", since = "2.13.4") def lineStream_! : Stream[String]                    = lineStream(withInput = false, nonZeroException = false, None, defaultStreamCapacity)
+    @deprecated("internal", since = "2.13.4") def lineStream_!(log: ProcessLogger): Stream[String] = lineStream(withInput = false, nonZeroException = false, Some(log), defaultStreamCapacity)
+    @deprecated("internal", since = "2.13.4") def lineStream(capacity: Integer): Stream[String]                       = lineStream(withInput = false, nonZeroException = true, None, capacity)
+    @deprecated("internal", since = "2.13.4") def lineStream(log: ProcessLogger, capacity: Integer): Stream[String]   = lineStream(withInput = false, nonZeroException = true, Some(log), capacity)
+    @deprecated("internal", since = "2.13.4") def lineStream_!(capacity: Integer) : Stream[String]                    = lineStream(withInput = false, nonZeroException = false, None, capacity)
+    @deprecated("internal", since = "2.13.4") def lineStream_!(log: ProcessLogger, capacity: Integer): Stream[String] = lineStream(withInput = false, nonZeroException = false, Some(log), capacity)
 
     def !                      = run(connectInput = false).exitValue()
     def !(io: ProcessIO)       = run(io).exitValue()
@@ -170,8 +173,11 @@ private[process] trait ProcessBuilderImpl {
       val lazilyListed = LazilyListed[String](nonZeroException, capacity)
       val process      = run(BasicIO(withInput, lazilyListed.process, log))
 
+      // extract done from lazilyListed so that the anonymous function below closes over just the done and not the whole lazilyListed (see https://github.com/scala/bug/issues/12185)
+      val done = lazilyListed.done
+
       Spawn("LazyLines") {
-        lazilyListed.done {
+        done {
           try process.exitValue()
           catch {
             case NonFatal(_) => -2
@@ -181,6 +187,7 @@ private[process] trait ProcessBuilderImpl {
       lazilyListed.lazyList
     }
 
+    @deprecated("internal", since = "2.13.4")
     private[this] def lineStream(
       withInput: Boolean,
       nonZeroException: Boolean,

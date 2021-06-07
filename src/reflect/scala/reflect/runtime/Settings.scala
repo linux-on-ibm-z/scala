@@ -15,6 +15,7 @@ package reflect
 package runtime
 
 import scala.reflect.internal.settings.MutableSettings
+import scala.reflect.internal.util.StatisticsStatics
 
 /** The Settings class for runtime reflection.
  *  This should be refined, so that settings are settable via command
@@ -42,24 +43,25 @@ private[reflect] class Settings extends MutableSettings {
     override def value: List[String] = v
   }
 
+  val async             = new BooleanSetting(false)
   val XnoPatmatAnalysis = new BooleanSetting(false)
   val Xprintpos         = new BooleanSetting(false)
   val Yposdebug         = new BooleanSetting(false)
-  val Yrangepos         = new BooleanSetting(false)
+  val Yrangepos         = new BooleanSetting(true)
   val Yshowsymowners    = new BooleanSetting(false)
   val Yshowsymkinds     = new BooleanSetting(false)
   val breakCycles       = new BooleanSetting(false)
-  val debug             = new BooleanSetting(false)
-  val developer         = new BooleanSetting(false)
+  val debug             = new BooleanSetting(false) { override def postSetHook() = if (v) StatisticsStatics.enableDebugAndDeoptimize()     }
+  val developer         = new BooleanSetting(false) { override def postSetHook() = if (v) StatisticsStatics.enableDeveloperAndDeoptimize() }
   val explaintypes      = new BooleanSetting(false)
   val printtypes        = new BooleanSetting(false)
   val uniqid            = new BooleanSetting(false)
   val verbose           = new BooleanSetting(false)
 
-  val YhotStatisticsEnabled = new BooleanSetting(false)
-  val YstatisticsEnabled    = new BooleanSetting(false)
+  val YhotStatisticsEnabled = new BooleanSetting(false) { override def postSetHook() = if (v && YstatisticsEnabled) StatisticsStatics.enableHotStatsAndDeoptimize()  }
+  val YstatisticsEnabled    = new BooleanSetting(false) { override def postSetHook() = if (v)                       StatisticsStatics.enableColdStatsAndDeoptimize() }
 
-  val Yrecursion        = new IntSetting(0)
-  def isScala212        = true
-  private[scala] def isScala213 = true
+  val Yrecursion = new IntSetting(0)
+  def isScala212 = true
+  def isScala213 = true
 }

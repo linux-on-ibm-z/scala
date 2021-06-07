@@ -33,7 +33,8 @@ import java.util.regex.{ Pattern, Matcher }
  *  and, if it does, to extract or transform the parts that match.
  *
  *  === Usage ===
- *  This class delegates to the [[java.util.regex]] package of the Java Platform.
+
+ *  This class delegates to the [[https://docs.oracle.com/javase/8/docs/api/java/util/regex/package-summary.html java.util.regex]] package of the Java Platform.
  *  See the documentation for [[java.util.regex.Pattern]] for details about
  *  the regular expression syntax for pattern strings.
  *
@@ -280,9 +281,9 @@ class Regex private[matching](val pattern: Pattern, groupNames: String*) extends
    *  @return       The matches
    */
   def unapplySeq(s: CharSequence): Option[List[String]] = {
-    val m = pattern matcher s
-      if (runMatcher(m)) Some(List.tabulate(m.groupCount) { i => m.group(i + 1) })
-      else None
+    val m = pattern.matcher(s)
+    if (runMatcher(m)) Some(List.tabulate(m.groupCount) { i => m.group(i + 1) })
+    else None
   }
 
   /** Tries to match the String representation of a [[scala.Char]].

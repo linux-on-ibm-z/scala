@@ -66,7 +66,7 @@ class PipedProcessTest {
     val p = new PipedProcessesMock(new ProcessBuilderMock(a, error = false), new ProcessBuilderMock(b, error = true), io, false)
     val f = Future {
       ignoring(classOf[IOException]) {
-        p.callRunAndExitValue(source, sink)
+        p.callRunAndExitValue(source, sink): Unit
       }
     }
     waitForIt(f.isCompleted)
@@ -87,7 +87,7 @@ class PipedProcessTest {
     val p = new PipedProcessesMock(new ProcessBuilderMock(a, error = true), new ProcessBuilderMock(b, error = false), io, false)
     val f = Future {
       ignoring(classOf[IOException]) {
-        p.callRunAndExitValue(source, sink)
+        p.callRunAndExitValue(source, sink): Unit
       }
     }
     waitForIt(f.isCompleted)
@@ -144,7 +144,7 @@ class PipeSourceSinkTest {
   }
 
   class PipeSink extends Process.PipeSink("TestPipeSink") {
-    def ensureRunloopStarted() = while (sink.isSet) Thread.sleep(10L)
+    def ensureRunloopStarted() = while (sink.peek() != null) Thread.sleep(10L)
     def isReleased = {
       val field = classOf[Process.PipeSink].getDeclaredField("pipe")
       field.setAccessible(true)
@@ -154,7 +154,7 @@ class PipeSourceSinkTest {
   }
 
   class PipeSource extends Process.PipeSource("TestPipeSource") {
-    def ensureRunloopStarted() = while (source.isSet) Thread.sleep(10L)
+    def ensureRunloopStarted() = while (source.peek() != null) Thread.sleep(10L)
     def isReleased = {
       val field = classOf[Process.PipeSource].getDeclaredField("pipe")
       field.setAccessible(true)
@@ -296,7 +296,7 @@ class PipeSourceMock extends Process.PipeSource("PipeSourceMock") {
 
 class PipedProcessesMock(a: ProcessBuilder, b: ProcessBuilder, defaultIO: ProcessIO, toError: Boolean)
   extends Process.PipedProcesses(a, b, defaultIO, toError) {
-  def callRunAndExitValue(source: Process.PipeSource, sink: Process.PipeSink) = {
+  private[process] final def callRunAndExitValue(source: Process.PipeSource, sink: Process.PipeSink) = {
     val m = classOf[Process.PipedProcesses].getDeclaredMethod("runAndExitValue", classOf[Process.PipeSource], classOf[Process.PipeSink])
     m.setAccessible(true)
     try m.invoke(this, source, sink).asInstanceOf[Option[Int]]

@@ -24,7 +24,7 @@ abstract class RedBlackTreeTest(tname: String) extends Properties(tname) with Re
   import RB._
 
   def nodeAt[A](tree: Tree[String, A], n: Int): Option[(String, A)] = if (n < iterator(tree).size && n >= 0)
-    Some(iterator(tree).drop(n).next)
+    Some(iterator(tree).drop(n).next())
   else
     None
 
@@ -45,9 +45,9 @@ abstract class RedBlackTreeTest(tname: String) extends Properties(tname) with Re
         right <- mkTree(nextLevel, !isRed, label + "R")
       } yield {
         if (isRed)
-          RedTree(label + "N", 0, left, right)
+          RB.RedTree(label + "N", 0, left, right)
         else
-          BlackTree(label + "N", 0, left, right)
+          RB.BlackTree(label + "N", 0, left, right)
       }
     }
 
@@ -76,6 +76,13 @@ trait RedBlackTreeInvariants[K, V] {
   self: Properties =>
 
   import RB._
+
+  object RedTree {
+    def unapply[A, B](t: Tree[A, B]) = if ((t ne null) && t.isRed) Some(t.key, t.value, t.left, t.right) else None
+  }
+  object BlackTree {
+    def unapply[A, B](t: Tree[A, B]) = if ((t ne null) && t.isBlack) Some(t.key, t.value, t.left, t.right) else None
+  }
 
   implicit def ordering: Ordering[K]
 
@@ -393,7 +400,7 @@ object TestPartitionLeft extends RedBlackTreeTest("RedBlackTree.partitionKeysLef
   override type ModifyParm = Int
   override def genParm(tree: Tree[String, Int]): Gen[ModifyParm] = choose(0, 0)
   override def modify(tree: Tree[String, Int], parm: ModifyParm): Tree[String, Int] =
-    partitionKeys[String, Int](tree, k => k.hashCode % 2 == 0)._1
+    partitionEntries[String, Int](tree, (k, v) => k.hashCode % 2 == 0)._1
 
   property("partition") = forAll(genInput) { case (tree, parm, newTree) =>
     iterator(tree).filter(t => t._1.hashCode % 2 == 0).toList == iterator(newTree).toList
@@ -406,7 +413,7 @@ object TestPartitionRight extends RedBlackTreeTest("RedBlackTree.partitionKeysRi
   override type ModifyParm = Int
   override def genParm(tree: Tree[String, Int]): Gen[ModifyParm] = choose(0, 0)
   override def modify(tree: Tree[String, Int], parm: ModifyParm): Tree[String, Int] =
-    partitionKeys[String, Int](tree, k => k.hashCode % 2 == 0)._2
+    partitionEntries[String, Int](tree, (k, v) => k.hashCode % 2 == 0)._2
 
   property("partition") = forAll(genInput) { case (tree, parm, newTree) =>
     iterator(tree).filter(t => t._1.hashCode % 2 != 0).toList == iterator(newTree).toList

@@ -53,7 +53,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
     extends ReflectGlobal(settings, reporter0, toolBoxSelf.classLoader) {
       import definitions._
 
-      private val trace = scala.tools.nsc.util.trace when settings.debug.value
+      private val trace = scala.tools.nsc.util.trace when settings.isDebug
 
       private var wrapCount = 0
 
@@ -110,7 +110,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
           if (namesakes.length > 0) name += ("$" + (namesakes.length + 1))
           freeTermNames += (ft -> newTermName(name + nme.REIFY_FREE_VALUE_SUFFIX))
         })
-        val expr = new Transformer {
+        val expr = new AstTransformer {
           override def transform(tree: Tree): Tree =
             if (tree.hasSymbolField && tree.symbol.isFreeTerm) {
               tree match {
@@ -167,7 +167,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
             }
 
           val invertedIndex = freeTerms map (_.swap)
-          val indexed = new Transformer {
+          val indexed = new AstTransformer {
             override def transform(tree: Tree): Tree =
               tree match {
                 case Ident(name: TermName) if invertedIndex contains name =>
@@ -189,7 +189,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
               case analyzer.SilentResultValue(result) =>
                 trace("success: ")(showAttributed(result, true, true, settings.Yshowsymkinds.value))
                 result
-              case error @ analyzer.SilentTypeError(_) =>
+              case error: analyzer.SilentTypeError =>
                 trace("failed: ")(error.err.errMsg)
                 if (!silent) throw ToolBoxError("reflective typecheck has failed: %s".format(error.err.errMsg))
                 EmptyTree
@@ -246,7 +246,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
             case _ => NoSymbol
           }
           trace("wrapping ")(defOwner(expr) -> meth)
-          val methdef = DefDef(meth, expr changeOwner (defOwner(expr), meth))
+          val methdef = DefDef(meth, expr.changeOwner(defOwner(expr), meth))
 
           val moduledef = ModuleDef(
               obj,
@@ -268,7 +268,7 @@ abstract class ToolBoxFactory[U <: JavaUniverse](val u: U) { factorySelf =>
         val msym = wrapInPackageAndCompile(mdef.name, mdef)
 
         val className = msym.fullName
-        if (settings.debug) println("generated: "+className)
+        if (settings.isDebug) println("generated: "+className)
         def moduleFileName(className: String) = className + "$"
         val jclazz = jClass.forName(moduleFileName(className), true, classLoader)
         val jmeth = jclazz.getDeclaredMethods.find(_.getName == wrapperMethodName).get

@@ -100,7 +100,9 @@ private[hashing] class MurmurHash3 {
   final def unorderedHash(xs: IterableOnce[Any], seed: Int): Int = {
     var a, b, n = 0
     var c = 1
-    xs.iterator foreach { x =>
+    val iterator = xs.iterator
+    while (iterator.hasNext) {
+      val x = iterator.next()
       val h = x.##
       a += h
       b ^= h
@@ -319,7 +321,9 @@ private[hashing] class MurmurHash3 {
  * This is based on the earlier MurmurHash3 code by Rex Kerr, but the
  * MurmurHash3 algorithm was since changed by its creator Austin Appleby
  * to remedy some weaknesses and improve performance. This represents the
- * latest and supposedly final version of the algorithm (revision 136).
+ * latest and supposedly final version of the algorithm (revision 136). Even
+ * so, test the generated hashes in between Scala versions, even for point
+ * releases, as fast, non-cryptographic hashing algorithms evolve rapidly.
  *
  * @see [[https://github.com/aappleby/smhasher]]
  */
@@ -405,20 +409,18 @@ object MurmurHash3 extends MurmurHash3 {
     def hash(xs: IterableOnce[Any]) = unorderedHash(xs)
   }
 
-  /** All this trouble and foreach still appears faster.
-   *  Leaving in place in case someone would like to investigate further.
-   */
-  /**
-  def linearSeqHash(xs: scala.collection.LinearSeq[_], seed: Int): Int = {
-    var n = 0
-    var h = seed
-    var elems = xs
-    while (elems.nonEmpty) {
-      h = mix(h, elems.head.##)
-      n += 1
-      elems = elems.tail
-    }
-    finalizeHash(h, n)
-  }
-  */
+//  /** All this trouble and foreach still appears faster.
+//   *  Leaving in place in case someone would like to investigate further.
+//   */
+//  def linearSeqHash(xs: scala.collection.LinearSeq[_], seed: Int): Int = {
+//    var n = 0
+//    var h = seed
+//    var elems = xs
+//    while (elems.nonEmpty) {
+//      h = mix(h, elems.head.##)
+//      n += 1
+//      elems = elems.tail
+//    }
+//    finalizeHash(h, n)
+//  }
 }

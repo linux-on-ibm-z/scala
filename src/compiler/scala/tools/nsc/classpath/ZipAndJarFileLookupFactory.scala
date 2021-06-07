@@ -36,13 +36,14 @@ sealed trait ZipAndJarFileLookupFactory {
   private val cache = new FileBasedCache[ClassPath with Closeable]
 
   def create(zipFile: AbstractFile, settings: Settings, closeableRegistry: CloseableRegistry): ClassPath = {
-    cache.checkCacheability(zipFile.toURL :: Nil, checkStamps = true, disableCache = settings.YdisableFlatCpCaching.value || zipFile.file == null) match {
+    val disabled = (settings.YdisableFlatCpCaching.value && !settings.YforceFlatCpCaching.value) || zipFile.file == null
+    cache.checkCacheability(zipFile.toURL :: Nil, checkStamps = true, disableCache = disabled) match {
       case Left(_) =>
         val result: ClassPath with Closeable = createForZipFile(zipFile, settings.releaseValue)
         closeableRegistry.registerCloseable(result)
         result
-      case Right(Seq(path)) =>
-        cache.getOrCreate(List(path), () => createForZipFile(zipFile, settings.releaseValue), closeableRegistry, checkStamps = true)
+      case Right(paths) =>
+        cache.getOrCreate(paths, () => createForZipFile(zipFile, settings.releaseValue), closeableRegistry, checkStamps = true)
     }
   }
 
@@ -62,7 +63,7 @@ object ZipAndJarClassPathFactory extends ZipAndJarFileLookupFactory {
       val (pkg, simpleClassName) = PackageNameUtils.separatePkgAndClassNames(className)
       file(PackageName(pkg), simpleClassName + ".class").map(_.file)
     }
-    // This method is performance sensitive as it is used by SBT's ExtractDependencies phase.
+    // This method is performance sensitive as it is used by sbt's ExtractDependencies phase.
     override def findClass(className: String): Option[ClassRepresentation] = {
       val (pkg, simpleClassName) = PackageNameUtils.separatePkgAndClassNames(className)
       file(PackageName(pkg), simpleClassName + ".class")
@@ -290,6 +291,7 @@ final class FileBasedCache[T] {
               } else {
                 // TODO: What do do here? Maybe add to a list of closeables polled by a cleanup thread?
               }
+            case x => throw new MatchError(x)
           }
           val value = create()
           val entry = Entry(stamps, value)

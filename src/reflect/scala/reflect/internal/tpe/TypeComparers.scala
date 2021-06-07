@@ -18,7 +18,6 @@ package tpe
 import scala.collection.mutable
 import util.TriState
 import scala.annotation.tailrec
-import scala.reflect.internal.util.StatisticsStatics
 
 trait TypeComparers {
   self: SymbolTable =>
@@ -66,7 +65,7 @@ trait TypeComparers {
 
   private def isSubPre(pre1: Type, pre2: Type, sym: Symbol) =
     if ((pre1 ne pre2) && (pre1 ne NoPrefix) && (pre2 ne NoPrefix) && pre1 <:< pre2) {
-      if (settings.debug) println(s"new isSubPre $sym: $pre1 <:< $pre2")
+      if (settings.isDebug) println(s"new isSubPre $sym: $pre1 <:< $pre2")
       true
     } else
       false
@@ -104,7 +103,7 @@ trait TypeComparers {
 
   /** Do `tp1` and `tp2` denote equivalent types? */
   def isSameType(tp1: Type, tp2: Type): Boolean = try {
-    if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(sametypeCount)
+    if (settings.areStatisticsEnabled) statistics.incCounter(sametypeCount)
     subsametypeRecursions += 1
     //OPT cutdown on Function0 allocation
     //was:
@@ -179,7 +178,7 @@ trait TypeComparers {
     sameLength(tparams1, tparams2) && {
     // corresponds does not check length of two sequences before checking the predicate,
     // but SubstMap assumes it has been checked (scala/bug#2956)
-      val substMap = new SubstSymMap(tparams2, tparams1)
+      val substMap = SubstSymMap(tparams2, tparams1)
       (
         (tparams1 corresponds tparams2)((p1, p2) => methodHigherOrderTypeParamsSameVariance(p1, p2) && p1.info =:= substMap(p2.info))
           && (res1 =:= substMap(res2))
@@ -358,8 +357,8 @@ trait TypeComparers {
       //@M for an example of why we need to generate fresh symbols otherwise, see neg/tcpoly_ticket2101.scala
       val substitutes = if (isMethod) tparams1 else cloneSymbols(tparams1)
 
-      val sub1: Type => Type = if (isMethod) (tp => tp) else new SubstSymMap(tparams1, substitutes)
-      val sub2: Type => Type = new SubstSymMap(tparams2, substitutes)
+      val sub1: Type => Type = if (isMethod) (tp => tp) else SubstSymMap(tparams1, substitutes)
+      val sub2: Type => Type = SubstSymMap(tparams2, substitutes)
 
       def cmp(p1: Symbol, p2: Symbol) = sub2(p2.info) <:< sub1(p1.info)
       (tparams1 corresponds tparams2)(cmp) && (sub1(res1) <:< sub2(res2))
@@ -404,7 +403,7 @@ trait TypeComparers {
     }
 
     def isSub(tp1: Type, tp2: Type) =
-      settings.isScala213 && isSubHKTypeVar(tp1, tp2) ||
+      isSubHKTypeVar(tp1, tp2) ||
         isSub2(tp1.normalize, tp2.normalize)  // @M! normalize reduces higher-kinded typeref to PolyType
 
     def isSub2(ntp1: Type, ntp2: Type) = (ntp1, ntp2) match {
@@ -463,7 +462,7 @@ trait TypeComparers {
             val sym2 = if (!phase.erasedTypes && (tr2 eq ObjectTpeJava)) AnyClass else tr2.sym
             val pre1 = tr1.pre
             val pre2 = tr2.pre
-            (((if (sym1 eq sym2) phase.erasedTypes || sym1.owner.hasPackageFlag || isSubType(pre1, pre2, depth)
+            (((if (sym1 eq sym2) phase.erasedTypes || sym1.rawowner.hasPackageFlag || isSubType(pre1, pre2, depth)
             else (sym1.name == sym2.name && !sym1.isModuleClass && !sym2.isModuleClass &&
               (isUnifiable(pre1, pre2) ||
                 isSameSpecializedSkolem(sym1, sym2, pre1, pre2) ||

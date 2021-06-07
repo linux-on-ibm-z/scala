@@ -20,7 +20,7 @@ import java.util.concurrent._
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future}
-import scala.reflect.internal.util.NoPosition
+import scala.tools.nsc.Reporting.WarningCategory
 import scala.tools.nsc.backend.jvm.PostProcessorFrontendAccess.BufferingBackendReporting
 import scala.tools.nsc.io.AbstractFile
 import scala.tools.nsc.profile.ThreadPoolFactory
@@ -30,7 +30,7 @@ import scala.util.control.NonFatal
  * Interface to handle post-processing and classfile writing (see [[PostProcessor]]) of generated
  * classes, potentially in parallel.
  */
-private[jvm] sealed trait GeneratedClassHandler {
+private[jvm] sealed trait GeneratedClassHandler extends AutoCloseable {
   val postProcessor: PostProcessor
 
   /**
@@ -59,8 +59,8 @@ private[jvm] object GeneratedClassHandler {
         new SyncWritingClassHandler(postProcessor)
 
       case maxThreads =>
-        if (global.statistics.enabled)
-          global.reporter.warning(global.NoPosition, "jvm statistics are not reliable with multi-threaded jvm class writing")
+        if (settings.areStatisticsEnabled)
+          runReporting.warning(NoPosition, "jvm statistics are not reliable with multi-threaded jvm class writing", WarningCategory.Other, site = "")
         val additionalThreads = maxThreads - 1
         // The thread pool queue is limited in size. When it's full, the `CallerRunsPolicy` causes
         // a new task to be executed on the main thread, which provides back-pressure.
@@ -101,6 +101,8 @@ private[jvm] object GeneratedClassHandler {
 
   sealed abstract class WritingClassHandler(val javaExecutor: Executor) extends GeneratedClassHandler {
     import postProcessor.bTypes.frontendAccess
+
+    import scala.reflect.internal.util.NoPosition
 
     def tryStealing: Option[Runnable]
 
@@ -144,7 +146,7 @@ private[jvm] object GeneratedClassHandler {
           }
       }
 
-      /**
+      /*
        * Go through each task in submission order, wait for it to finish and report its messages.
        * When finding task that has not completed, steal work from the executor's queue and run
        * it on the main thread (which we are on here), until the task is done.

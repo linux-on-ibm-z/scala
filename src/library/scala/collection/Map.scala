@@ -13,6 +13,7 @@
 package scala
 package collection
 
+import scala.annotation.nowarn
 import scala.collection.generic.DefaultSerializable
 import scala.collection.mutable.StringBuilder
 import scala.util.hashing.MurmurHash3
@@ -28,20 +29,47 @@ trait Map[K, +V]
 
   def canEqual(that: Any): Boolean = true
 
-  override def equals(o: Any): Boolean = o match {
-    case that: Map[K, _] =>
-      (this eq that) ||
-      (that canEqual this) &&
-      (this.size == that.size) && {
-        try {
-          this forall { case (k, v) => that.getOrElse(k, Map.DefaultSentinel) == v }
-        } catch {
-          case _: ClassCastException => false
+  /**
+   * Equality of maps is implemented using the lookup method [[get]]. This method returns `true` if
+   *   - the argument `o` is a `Map`,
+   *   - the two maps have the same [[size]], and
+   *   - for every `(key, value)` pair in this map, `other.get(key) == Some(value)`.
+   *
+   * The implementation of `equals` checks the [[canEqual]] method, so subclasses of `Map` can narrow down the equality
+   * to specific map types. The `Map` implementations in the standard library can all be compared, their `canEqual`
+   * methods return `true`.
+   *
+   * Note: The `equals` method only respects the equality laws (symmetry, transitivity) if the two maps use the same
+   * key equivalence function in their lookup operation. For example, the key equivalence operation in a
+   * [[scala.collection.immutable.TreeMap]] is defined by its ordering. Comparing a `TreeMap` with a `HashMap` leads
+   * to unexpected results if `ordering.equiv(k1, k2)` (used for lookup in `TreeMap`) is different from `k1 == k2`
+   * (used for lookup in `HashMap`).
+   *
+   * {{{
+   *   scala> import scala.collection.immutable._
+   *   scala> val ord: Ordering[String] = _ compareToIgnoreCase _
+   *
+   *   scala> TreeMap("A" -> 1)(ord) == HashMap("a" -> 1)
+   *   val res0: Boolean = false
+   *
+   *   scala> HashMap("a" -> 1) == TreeMap("A" -> 1)(ord)
+   *   val res1: Boolean = true
+   * }}}
+   *
+   *
+   * @param o The map to which this map is compared
+   * @return `true` if the two maps are equal according to the description
+   */
+  override def equals(o: Any): Boolean =
+    (this eq o.asInstanceOf[AnyRef]) || (o match {
+      case map: Map[K, _] if map.canEqual(this) =>
+        (this.size == map.size) && {
+          try this.forall(kv => map.getOrElse(kv._1, Map.DefaultSentinelFn()) == kv._2)
+          catch { case _: ClassCastException => false } // PR #9565 / scala/bug#12228
         }
-      }
-    case _ =>
-      false
-  }
+      case _ =>
+        false
+    })
 
   override def hashCode(): Int = MurmurHash3.mapHash(toIterable)
 
@@ -51,6 +79,7 @@ trait Map[K, +V]
   @deprecated("Use -- or removedAll on an immutable Map", "2.13.0")
   def - (key1: K, key2: K, keys: K*): Map[K, V]
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "Map"
 
   override def toString(): String = super[Iterable].toString() // Because `Function1` overrides `toString` too
@@ -158,7 +187,7 @@ trait MapOps[K, +V, +CC[_, _] <: IterableOps[_, AnyConstr, _], +C]
   /** The implementation class of the set returned by `keySet`.
     */
   protected class KeySet extends AbstractSet[K] with GenKeySet with DefaultSerializable {
-    def diff(that: Set[K]): Set[K] = fromSpecific(view.filterNot(that))
+    def diff(that: Set[K]): Set[K] = fromSpecific(this.view.filterNot(that))
   }
 
   /** A generic trait that is reused by keyset implementations */
@@ -332,7 +361,7 @@ trait MapOps[K, +V, +CC[_, _] <: IterableOps[_, AnyConstr, _], +C]
       case that: Iterable[(K, V1)] => that
       case that => View.from(that)
     }
-    mapFactory.from(new View.Concat(toIterable, thatIterable))
+    mapFactory.from(new View.Concat(thatIterable, toIterable))
   }
 }
 
@@ -369,6 +398,7 @@ object MapOps {
 @SerialVersionUID(3L)
 object Map extends MapFactory.Delegate[Map](immutable.Map) {
   private val DefaultSentinel: AnyRef = new AnyRef
+  private val DefaultSentinelFn: () => AnyRef = () => DefaultSentinel
 }
 
 /** Explicit instantiation of the `Map` trait to reduce class file size in subclasses. */

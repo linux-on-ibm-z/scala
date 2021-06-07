@@ -7,7 +7,7 @@ import scala.tools.partest.DirectTest
 import scala.jdk.CollectionConverters._
 
 /**
- * Test that the ICodeReader does not crash if the bytecode of a method has unreachable code.
+ * Test that ClassReader does not crash if the bytecode of a method has unreachable code.
  */
 object Test extends DirectTest {
   def code: String = ???
@@ -30,7 +30,7 @@ object Test extends DirectTest {
         |}
       """.stripMargin
 
-    compileString(newCompiler(s"-usejavacp", "-cp", testOutput.path))(aCode)
+    compileString(newCompiler("-usejavacp", "-cp", testOutput.path))(aCode)
 
     addDeadCode()
 

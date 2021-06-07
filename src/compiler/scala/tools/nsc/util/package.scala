@@ -25,9 +25,6 @@ package object util {
   type HashSet[T >: Null <: AnyRef] = scala.reflect.internal.util.HashSet[T]
   val HashSet = scala.reflect.internal.util.HashSet
 
-  /** Apply a function and return the passed value */
-  def returning[T](x: T)(f: T => Unit): T = { f(x) ; x }
-
   /** Execute code and then wait for all non-daemon Threads
    *  created and begun during its execution to complete.
    */
@@ -112,6 +109,11 @@ package object util {
      *  @param p the predicate to select the prefix
      */
     def stackTracePrefixString(p: StackTraceElement => Boolean): String = stackTracePrefixString(e)(p)
+  }
+
+  implicit class `quickie stack dump`(private val sc: StringContext) extends AnyVal {
+    @deprecated("For debug only", since="forever")
+    def trace(args: Any*): Unit = new Throwable(sc.s(args: _*)).printStackTrace()
   }
 
   lazy val trace = new SimpleTracer(System.out)

@@ -17,6 +17,7 @@ package tpe
 
 import scala.collection.mutable.BitSet
 import scala.collection.mutable.Clearable
+import scala.reflect.internal.util.ReusableInstance
 
 private[internal] trait TypeConstraints {
   self: SymbolTable =>
@@ -61,7 +62,7 @@ private[internal] trait TypeConstraints {
     }
 
     def clear(): Unit = {
-      if (settings.debug)
+      if (settings.isDebug)
         self.log("Clearing " + log.size + " entries from the undoLog.")
       log = Nil
     }
@@ -100,8 +101,8 @@ private[internal] trait TypeConstraints {
       *  guarding addLoBound/addHiBound somehow broke raw types so it
       *  only guards against being created with them.]
       */
-    private[this] var lobounds = lo0 filterNot typeIsNothing
-    private[this] var hibounds = hi0 filterNot typeIsAnyOrJavaObject
+    private[this] var lobounds = lo0 filterNot (_.isNothing)
+    private[this] var hibounds = hi0 filterNot (_.isAny)
     private[this] var numlo = numlo0
     private[this] var numhi = numhi0
     private[this] var avoidWidening = avoidWidening0
@@ -112,7 +113,7 @@ private[internal] trait TypeConstraints {
     def stopWidening(): Unit = avoidWidening = true
 
     def stopWideningIfPrecluded(): Unit =
-      if (instValid && TypeVar.precludesWidening(inst)) stopWidening
+      if (instValid && TypeVar.precludesWidening(inst)) stopWidening()
 
     def addLoBound(tp: Type, isNumericBound: Boolean = false): Unit = {
       // For some reason which is still a bit fuzzy, we must let Nothing through as
@@ -181,7 +182,7 @@ private[internal] trait TypeConstraints {
 
     override def toString = {
       val boundsStr = {
-        val lo = loBounds filterNot typeIsNothing match {
+        val lo = loBounds filterNot (_.isNothing) match {
           case Nil       => ""
           case tp :: Nil => " >: " + tp
           case tps       => tps.mkString(" >: (", ", ", ")")
@@ -197,6 +198,14 @@ private[internal] trait TypeConstraints {
       else boundsStr + " _= " + inst.safeToString
     }
   }
+
+  private[this] val containsCollectorInstances: ReusableInstance[ContainsCollector] = ReusableInstance(new ContainsCollector(null), enabled = isCompilerUniverse)
+
+  private[this] def containsSymbol(tp: Type, sym: Symbol): Boolean =
+    containsCollectorInstances.using { cc =>
+      cc.reset(sym)
+      cc.collect(tp)
+    }
 
   /** Solve constraint collected in types `tvars`.
     *
@@ -237,14 +246,14 @@ private[internal] trait TypeConstraints {
         //   - our current tparam equals the other tparam's bound (we'll add the symmetric bound below)
         foreachWithIndex(tvars) { (tvarOther, ix) =>
           val tparamOther = tvarOther.origin.typeSymbol
-          if ((tparamOther ne tparam) && ((bound contains tparamOther) || tvarIsBoundOf(tparamOther))) {
+          if ((tparamOther ne tparam) && containsSymbol(bound, tparamOther) || tvarIsBoundOf(tparamOther)) {
             if (tvarOther.constr.inst eq null) otherTypeVarBeingSolved = true
             solveOne(tvarOther, areContravariant(ix))
           }
         }
 
 
-        if (!(otherTypeVarBeingSolved || (bound contains tparam))) {
+        if (!(otherTypeVarBeingSolved || containsSymbol(bound, tparam))) {
           val boundSym = bound.typeSymbol
           if (up) {
             if (boundSym != AnyClass)

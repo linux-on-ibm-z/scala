@@ -14,19 +14,20 @@ package scala.tools.nsc
 
 import scala.tools.nsc.doc.DocFactory
 import scala.tools.nsc.reporters.ConsoleReporter
-import scala.reflect.internal.Reporter
-import scala.reflect.internal.util.{ FakePos, NoPosition, Position }
+import scala.tools.nsc.settings.DefaultPathFactory
+import scala.reflect.internal.util.{FakePos, Position}
 
 /** The main class for scaladoc, a front-end for the Scala compiler
  *  that generates documentation from source files.
  */
 class ScalaDoc {
-  val versionMsg = "Scaladoc %s -- %s".format(Properties.versionString, Properties.copyrightString)
+  val versionMsg = s"Scaladoc ${Properties.versionString} -- ${Properties.copyrightString}"
 
   def process(args: Array[String]): Boolean = {
     var reporter: ScalaDocReporter = null
     val docSettings = new doc.Settings(msg => reporter.error(FakePos("scaladoc"), msg + "\n  scaladoc -help  gives more information"),
-                                       msg => reporter.echo(msg))
+                                       msg => reporter.echo(msg),
+                                       DefaultPathFactory)
     reporter = new ScalaDocReporter(docSettings)
     val command = new ScalaDoc.Command(args.toList, docSettings)
     def hasFiles = command.files.nonEmpty || docSettings.uncompilableFiles.nonEmpty
@@ -47,7 +48,7 @@ class ScalaDoc {
       try { new DocFactory(reporter, docSettings) document command.files }
       catch {
         case ex @ FatalError(msg) =>
-          if (docSettings.debug.value) ex.printStackTrace()
+          if (docSettings.isDebug) ex.printStackTrace()
           reporter.error(null, "fatal error: " + msg)
       }
       finally reporter.finish()
@@ -96,21 +97,5 @@ object ScalaDoc extends ScalaDoc {
 
   def main(args: Array[String]): Unit = {
     System.exit(if (process(args)) 0 else 1)
-  }
-
-  implicit class SummaryReporter(val rep: Reporter) extends AnyVal {
-    /** Adds print lambda to ScalaDocReporter, executes it on other reporter */
-    private[this] def summaryMessage(pos: Position, msg: String, print: () => Unit): Unit = rep match {
-      case r: ScalaDocReporter => r.addDelayedMessage(pos, msg, print)
-      case _ => print()
-    }
-
-    def summaryEcho(pos: Position, msg: String): Unit    = summaryMessage(pos, msg, () => rep.echo(pos, msg))
-    def summaryError(pos: Position, msg: String): Unit   = summaryMessage(pos, msg, () => rep.error(pos, msg))
-    def summaryWarning(pos: Position, msg: String): Unit = summaryMessage(pos, msg, () => rep.warning(pos, msg))
-
-    def summaryEcho(msg: String): Unit    = summaryEcho(NoPosition, msg)
-    def summaryError(msg: String): Unit   = summaryError(NoPosition, msg)
-    def summaryWarning(msg: String): Unit = summaryWarning(NoPosition, msg)
   }
 }

@@ -13,13 +13,14 @@
 package scala.collection
 package mutable
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializationProxy
+import scala.util.hashing.MurmurHash3
 
 /** This class implements mutable maps using a hashtable.
   *
-  *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
+  *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
   *  section on `Hash Tables` for more information.
   *
   *  @tparam K    the type of the keys contained in this hash map.
@@ -30,7 +31,7 @@ import scala.collection.generic.DefaultSerializationProxy
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@deprecatedInheritance("HashMap wil be made final; use .withDefault for the common use case of computing a default value", "2.13.0")
+@deprecatedInheritance("HashMap will be made final; use .withDefault for the common use case of computing a default value", "2.13.0")
 class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
   extends AbstractMap[K, V]
     with MapOps[K, V, HashMap, HashMap[K, V]]
@@ -39,6 +40,11 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     with MapFactoryDefaults[K, V, HashMap, Iterable]
     with Serializable {
 
+  /* The HashMap class holds the following invariant:
+   * - For each i between  0 and table.length, the bucket at table(i) only contains keys whose hash-index is i.
+   * - Every bucket is sorted in ascendent hash order
+   * - The sum of the lengths of all buckets is equal to contentSize.
+   */
   def this() = this(HashMap.defaultInitialCapacity, HashMap.defaultLoadFactor)
 
   import HashMap.Node
@@ -102,7 +108,13 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
           put0(next.key, next.value, next.hash, getOld = false)
         }
         this
-      case _ => super.addAll(xs)
+      case thatMap: Map[K, V] =>
+        thatMap.foreachEntry { (key: K, value: V) =>
+          put0(key, value, improveHash(key.##), getOld = false)
+        }
+        this
+      case _ =>
+        super.addAll(xs)
     }
   }
 
@@ -149,7 +161,13 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
           else table(indexedHash) = foundNode.next
           contentSize -= 1
 
-        case (None, Some(value)) => put0(key, value, false, hash, indexedHash)
+        case (None, Some(value)) =>
+          val newIndexedHash =
+            if (contentSize + 1 >= threshold) {
+              growTable(table.length * 2)
+              index(hash)
+            } else indexedHash
+          put0(key, value, false, hash, newIndexedHash)
 
         case (Some(_), Some(newValue)) => foundNode.value = newValue
       }
@@ -341,6 +359,8 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
   }
 
   private[this] def growTable(newlen: Int) = {
+    if (newlen < 0)
+      throw new RuntimeException(s"new HashMap table size $newlen exceeds maximum")
     var oldlen = table.length
     threshold = newThreshold(newlen)
     if(size == 0) table = new Array(newlen)
@@ -471,6 +491,16 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     }
   }
 
+  override def foreachEntry[U](f: (K, V) => U): Unit = {
+    val len = table.length
+    var i = 0
+    while(i < len) {
+      val n = table(i)
+      if(n ne null) n.foreachEntry(f)
+      i += 1
+    }
+  }
+
   protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(new mutable.HashMap.DeserializationFactory[K, V](table.length, loadFactor), this)
 
   override def filterInPlace(p: (K, V) => Boolean): this.type = {
@@ -507,7 +537,7 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     this
   }
 
-  // TODO in 2.14: rename to `mapValuesInPlace` and override the base version (not binary compatible)
+  // TODO: rename to `mapValuesInPlace` and override the base version (not binary compatible)
   private[mutable] def mapValuesInPlaceImpl(f: (K, V) => V): this.type = {
     val len = table.length
     var i = 0
@@ -524,7 +554,23 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
 
   override def mapFactory: MapFactory[HashMap] = HashMap
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "HashMap"
+
+  override def hashCode: Int = {
+    if (isEmpty) MurmurHash3.emptyMapHash
+    else {
+      val tupleHashIterator = new HashMapIterator[Any] {
+        var hash: Int = 0
+        override def hashCode: Int = hash
+        override protected[this] def extract(nd: Node[K, V]): Any = {
+          hash = MurmurHash3.tuple2Hash(unimproveHash(nd.hash), nd.value.##)
+          this
+        }
+      }
+      MurmurHash3.unorderedHash(tupleHashIterator, MurmurHash3.mapSeed)
+    }
+  }
 }
 
 /**
@@ -580,6 +626,12 @@ object HashMap extends MapFactory[HashMap] {
     def foreach[U](f: ((K, V)) => U): Unit = {
       f((_key, _value))
       if(_next ne null) _next.foreach(f)
+    }
+
+    @tailrec
+    def foreachEntry[U](f: (K, V) => U): Unit = {
+      f(_key, _value)
+      if(_next ne null) _next.foreachEntry(f)
     }
 
     override def toString = s"Node($key, $value, $hash) -> $next"

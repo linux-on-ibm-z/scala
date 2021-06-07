@@ -58,7 +58,7 @@ object Test {
   object SeqUnapply {
     case class SFB(i: Int, xs: List[Int])
     def run(): Unit = {
-      List(1, 2) match {
+      (List(1, 2): @unchecked) match {
         case List(1) => assert(false, "wrong case")
         case List(1, 2, xs@_*) => assert(xs.isEmpty, "not empty")
         case Nil => assert(false, "wrong case")
@@ -344,7 +344,7 @@ object Test {
       case n :: ls => flips((l take n reverse) ::: (l drop n)) + 1
     }
 
-    def run(): Unit = { assertEquals("both", (Var("x"), Var("y")), f) }
+    def run(): Unit = { assertEquals("both", (Var("x"), Var("y")), f()) }
   }
 
   object TestUnbox {

@@ -7,7 +7,7 @@ import org.junit.{Ignore, Test}
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.internal.util.JavaClearable
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
@@ -298,7 +298,7 @@ class InlinerTest extends BytecodeTesting {
         |  }
         |}
       """.stripMargin
-    val c = compileClass(code)
+    @annotation.unused val c = compileClass(code)
     assert(callGraph.callsites.valuesIterator.flatMap(_.valuesIterator) exists (_.callsiteInstruction.name == "clone"))
   }
 
@@ -1132,9 +1132,9 @@ class InlinerTest extends BytecodeTesting {
         |    // there is no specialized variant of Function2 for this combination of types, so the IndyLambda has to create a generic Function2.
         |    // IndyLambda: SAM type is JFunction2, SAM is apply(ObjectObject)Object, body method is $anonfun$adapted(ObjectObject)Object
         |    val f = (b: Byte, i: Int) => i + b
-        |    // invocation of apply(ObjectOjbect)Object, matches SAM in IndyLambda. arguments are boxed, result unboxed.
+        |    // invocation of apply(ObjectObject)Object, matches SAM in IndyLambda. arguments are boxed, result unboxed.
         |    f(1, 2)
-        |    // opt: re-wrtie to $anonfun$adapted
+        |    // opt: re-write to $anonfun$adapted
         |    // inline that call, then we get box-unbox pairs (can be eliminated) and a call to $anonfun(BI)I
         |  }
         |
@@ -1159,10 +1159,10 @@ class InlinerTest extends BytecodeTesting {
         |
         |
         |  @inline final def m4a[T, U, V](f: (T, U) => V, x: T, y: U) = f(x, y) // invocation to generic apply(ObjectObject)Object
-        |  def t4a = m4a((x: Int, y: Double) => 1L + x + y.toLong, 1, 2d) // IndyLambda uses specilized JFunction2$mcJID$sp. after inlining m4a, similar to t4.
+        |  def t4a = m4a((x: Int, y: Double) => 1L + x + y.toLong, 1, 2d) // IndyLambda uses specialized JFunction2$mcJID$sp. after inlining m4a, similar to t4.
         |
         |  def t5 = {
-        |    // no specialization for the comibnation of primitives
+        |    // no specialization for the combination of primitives
         |    // IndyLambda: SAM type is JFunction2, SAM is generic apply, body method is $anonfun$adapted
         |    val f: (Int, Byte) => Any = (x: Int, b: Byte) => 1
         |    // invocation of generic apply.
@@ -1198,10 +1198,10 @@ class InlinerTest extends BytecodeTesting {
         |
         |  // m9$mVc$sp invokes apply$mcVI$sp
         |  @inline final def m9[@specialized(Unit) U](f: Int => U): Unit = f(1)
-        |  // IndyLambda: JFunction1, SAM is apply(Obj)Obj, body method $anonfun$adapted(Ojb)Obj
+        |  // IndyLambda: JFunction1, SAM is apply(Obj)Obj, body method $anonfun$adapted(Obj)Obj
         |  // invocation of m9$mVc$sp
         |  def t9 = m9(println)
-        |  // opt: after inlining m9, rewrite to $anonfun$adapted(Ojb)Obj, which requires inserting a box operation for the parameter.
+        |  // opt: after inlining m9, rewrite to $anonfun$adapted(Obj)Obj, which requires inserting a box operation for the parameter.
         |  // then we inline $adapted, which has signature (Obj)V. the `BoxedUnit.UNIT` from the body of $anonfun$adapted is eliminated by push-pop
         |
         |  def t9a = (1 to 10) foreach println // similar to t9
@@ -1335,7 +1335,7 @@ class InlinerTest extends BytecodeTesting {
         |
         |  def t1(c: C) = asC(c) // eliminated
         |  def t2(c: C) = asO(c) // eliminated
-        |  def t3(c: Object) = asC(c) // not elimianted
+        |  def t3(c: Object) = asC(c) // not eliminated
         |  def t4(c: C, d: D, b: Boolean) = asC(if (b) c else d) // not eliminated: lub of two non-equal reference types approximated with Object
         |  def t5(c: C, d: D, b: Boolean) = asO(if (b) c else d)
         |  def t6(c: C, cs: Array[C], b: Boolean) = asO(if (b) c else cs)
@@ -1443,7 +1443,7 @@ class InlinerTest extends BytecodeTesting {
         |final class K extends V with U { override def m = super[V].m }
         |class C { def t = (new K).f }
       """.stripMargin
-    val c :: _ = compileClasses(code)
+    val c :: _ = compileClasses(code): @unchecked
     assertSameSummary(getMethod(c, "t"), List(NEW, "<init>", ICONST_1, IRETURN))  // ICONST_1, U.f is inlined (not T.f)
   }
 
@@ -1480,7 +1480,7 @@ class InlinerTest extends BytecodeTesting {
         |  def t(): Unit = new ScalaObservable("").scMap("")
         |}
       """.stripMargin)
-    val c :: _ = compileClassesSeparately(codes, extraArgs = compilerArgs)
+    val c :: _ = compileClassesSeparately(codes, extraArgs = compilerArgs): @unchecked
     assertNoInvoke(getMethod(c, "t"))
   }
 
@@ -1512,7 +1512,7 @@ class InlinerTest extends BytecodeTesting {
         |  def t3 = mc // lines
         |}
       """.stripMargin
-    val run = compiler.newRun
+    val run = compiler.newRun()
     run.compileSources(List(makeSourceFile(code1, "A.scala"), makeSourceFile(code2, "B.scala")))
     val List(_, _, c) = readAsmClasses(getGeneratedClassfiles(global.settings.outputDirs.getSingleOutput.get))
     def is(name: String) = getMethod(c, name).instructions.filterNot(_.isInstanceOf[FrameEntry])
@@ -1672,7 +1672,7 @@ class InlinerTest extends BytecodeTesting {
         |when entering an exception handler declared in the inlined method.""".stripMargin
     val List(a, c, t) = compileClasses(code, allowMessage = _.msg contains warn)
 
-    // inlinig of m$ is rolled back, because <invokespecial T.m> is not legal in class C.
+    // inlining of m$ is rolled back, because <invokespecial T.m> is not legal in class C.
     assertInvoke(getMethod(c, "t"), "T", "m$")
   }
 
@@ -1916,7 +1916,7 @@ class InlinerTest extends BytecodeTesting {
         |  def t2a(a: Array[Int]) = a.foldLeft(0)(_ + _)
         |  def t2b(a: Array[String]) = a.foldLeft(0)(_ + _.length)
         |
-        |  // also covers `scan`, `scanRigth`
+        |  // also covers `scan`, `scanRight`
         |  def t3a(a: Array[Int]) = a.scanLeft(0)(_ + _)
         |  def t3b(a: Array[String]) = a.scanLeft(0)(_ + _.length)
         |  def t3c(a: Array[String]) = a.scanLeft("")((_, s) => s.trim)
@@ -1987,7 +1987,7 @@ class InlinerTest extends BytecodeTesting {
   //
   // questionable
   //  - sorted: looks very bad for primitive arrays, creates an array with boxed values.
-  //    just call Arrays.sort instead... should we deprecate the mehtod? only use is sorting
+  //    just call Arrays.sort instead... should we deprecate the method? only use is sorting
   //    generic arrays.
   //
   //
@@ -2253,7 +2253,7 @@ class InlinerTest extends BytecodeTesting {
         |  def t2b = TT.m2      // mixin forwarder is inlined, static forwarder then as well because the final method is forwarder
         |}
       """.stripMargin
-    val c :: _ = compileClasses(code)
+    val c :: _ = compileClasses(code): @unchecked
     assertNoInvoke(getMethod(c, "t1a"))
     assertNoInvoke(getMethod(c, "t1b"))
     assertInvoke(getMethod(c, "t2a"), "T", "p")

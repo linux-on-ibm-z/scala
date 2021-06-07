@@ -16,7 +16,7 @@ package internal
 
 import java.net.URLClassLoader
 
-import scala.annotation.{elidable, tailrec}
+import scala.annotation.{elidable, nowarn, tailrec}
 import scala.collection.mutable
 import util._
 import java.util.concurrent.TimeUnit
@@ -87,15 +87,16 @@ abstract class SymbolTable extends macros.Universe
 
   def shouldLogAtThisPhase = false
   def isPastTyper = false
-  final def isDeveloper: Boolean = settings.debug.value || settings.developer.value
-  def picklerPhase: Phase
 
+  @inline final def isDeveloper: Boolean = settings.isDebug || settings.isDeveloper
+
+  def picklerPhase: Phase
   def erasurePhase: Phase
 
   def settings: MutableSettings
 
   /** Override with final implementation for inlining. */
-  def debuglog(msg:  => String): Unit = if (settings.debug) log(msg)
+  def debuglog(msg:  => String): Unit = if (settings.isDebug) log(msg)
 
   /** dev-warns if dev-warning is enabled and `cond` is true; no-op otherwise */
   @inline final def devWarningIf(cond: => Boolean)(msg: => String): Unit =
@@ -191,6 +192,7 @@ abstract class SymbolTable extends macros.Universe
   /** Dump each symbol to stdout after shutdown.
    */
   final val traceSymbolActivity = System.getProperty("scalac.debug.syms") != null
+  @nowarn("cat=deprecation&msg=early initializers")
   object traceSymbols extends {
     val global: SymbolTable.this.type = SymbolTable.this
   } with util.TraceSymbolActivity
@@ -377,8 +379,8 @@ abstract class SymbolTable extends macros.Universe
       }
       val newParams = method.newSyntheticValueParams(formals.init :+ definitions.javaRepeatedType(elemtp))
       MethodType(newParams, rtpe)
-    case PolyType(tparams, rtpe) =>
-      PolyType(tparams, arrayToRepeated(rtpe))
+    case PolyType(tparams, rtpe) => PolyType(tparams, arrayToRepeated(rtpe))
+    case x                       => throw new MatchError(x)
   }
 
   abstract class SymLoader extends LazyType {
@@ -448,10 +450,10 @@ abstract class SymbolTable extends macros.Universe
 
     def clearAll() = {
       debuglog("Clearing " + (caches.size + javaCaches.size) + " caches.")
-      caches foreach (ref => Option(ref.get).foreach(_.clear))
+      caches foreach (ref => Option(ref.get).foreach(_.clear()))
       caches = caches.filterNot(_.get == null)
 
-      javaCaches foreach (_.clear)
+      javaCaches foreach (_.clear())
       javaCaches = javaCaches.filter(_.isValid)
     }
 
@@ -496,8 +498,9 @@ abstract class SymbolTable extends macros.Universe
   }
   var nextFrom: Array[InfoTransformer] = null
 
+  private final val MaxPhases = 256
   /** The phase which has given index as identifier. */
-  val phaseWithId: Array[Phase]
+  final val phaseWithId: Array[Phase] = Array.fill(MaxPhases)(NoPhase)
 
   /** Is this symbol table a part of a compiler universe?
    */

@@ -1,4 +1,4 @@
-// scalac: -feature -Xfatal-warnings -Xsource:2.12
+// scalac: -feature -Werror
 //
 class A
 class B[T](x: T)
@@ -15,6 +15,7 @@ object Test extends App {
 
   def f2(d: D) = d match {
     case D(a, b1, b2) => ()
+    case _            => ???
   }
 
   def f3(e: E) = e match {

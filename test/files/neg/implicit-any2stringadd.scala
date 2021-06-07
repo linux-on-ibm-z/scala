@@ -1,4 +1,4 @@
-// scalac: -Xsource:2.14 -Xlog-implicits
+// scalac: -Xsource:3 -Vimplicits
 //
 object Test {
   true + "what"

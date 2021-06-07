@@ -13,17 +13,17 @@
 package scala.collection
 package mutable
 
-import scala.annotation.tailrec
-import scala.collection.immutable.{List, Nil, ::}
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
+import scala.collection.immutable.{::, List, Nil}
 import java.lang.{IllegalArgumentException, IndexOutOfBoundsException}
+
 import scala.collection.generic.DefaultSerializable
 import scala.runtime.Statics.releaseFence
 
 /** A `Buffer` implementation backed by a list. It provides constant time
   *  prepend and append. Most other operations are linear.
   *
-  *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#list-buffers "Scala's Collection Library overview"]]
+  *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#list-buffers "Scala's Collection Library overview"]]
   *  section on `List Buffers` for more information.
   *
   *  @tparam A    the type of this list buffer's elements.
@@ -35,6 +35,7 @@ import scala.runtime.Statics.releaseFence
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
+@SerialVersionUID(-8428291952499836345L)
 class ListBuffer[A]
   extends AbstractBuffer[A]
      with SeqOps[A, ListBuffer, ListBuffer[A]]
@@ -42,6 +43,7 @@ class ListBuffer[A]
      with ReusableBuilder[A, immutable.List[A]]
      with IterableFactoryDefaults[A, ListBuffer]
      with DefaultSerializable {
+  @transient private[this] var mutationCount: Int = 0
 
   private var first: List[A] = Nil
   private var last0: ::[A] = null
@@ -50,7 +52,7 @@ class ListBuffer[A]
 
   private type Predecessor[A0] = ::[A0] /*| Null*/
 
-  def iterator = first.iterator
+  def iterator: Iterator[A] = new MutationTracker.CheckedIterator(first.iterator, mutationCount)
 
   override def iterableFactory: SeqFactory[ListBuffer] = ListBuffer
 
@@ -63,13 +65,18 @@ class ListBuffer[A]
   override def isEmpty: Boolean = len == 0
 
   private def copyElems(): Unit = {
-    val buf = ListBuffer.from(this)
+    val buf = new ListBuffer[A].freshFrom(this)
     first = buf.first
     last0 = buf.last0
     aliased = false
   }
 
-  private def ensureUnaliased() = if (aliased) copyElems()
+  // we only call this before mutating things, so it's
+  // a good place to track mutations for the iterator
+  private def ensureUnaliased(): Unit = {
+    mutationCount += 1
+    if (aliased) copyElems()
+  }
 
   // Avoids copying where possible.
   override def toList: List[A] = {
@@ -97,6 +104,7 @@ class ListBuffer[A]
   }
 
   def clear(): Unit = {
+    mutationCount += 1
     first = Nil
     len = 0
     last0 = null
@@ -112,21 +120,35 @@ class ListBuffer[A]
     this
   }
 
-  // Overridden for performance
-  override final def addAll(xs: IterableOnce[A]): this.type = {
+  // MUST only be called on fresh instances
+  private def freshFrom(xs: IterableOnce[A]): this.type = {
     val it = xs.iterator
     if (it.hasNext) {
-      ensureUnaliased()
-      val last1 = new ::[A](it.next(), Nil)
-      if (len == 0) first = last1 else last0.next = last1
-      last0 = last1
-      len += 1
+      var len = 1
+      var last0 = new ::[A](it.next(), Nil)
+      first = last0
       while (it.hasNext) {
         val last1 = new ::[A](it.next(), Nil)
         last0.next = last1
         last0 = last1
         len += 1
       }
+      // copy local vars into instance
+      this.len = len
+      this.last0 = last0
+    }
+    this
+  }
+
+  override final def addAll(xs: IterableOnce[A]): this.type = {
+    val it = xs.iterator
+    if (it.hasNext) {
+      val fresh = new ListBuffer[A].freshFrom(it)
+      ensureUnaliased()
+      if (len == 0) first = fresh.first
+      else last0.next = fresh.first
+      last0 = fresh.last0
+      len += fresh.length
     }
     this
   }
@@ -216,27 +238,26 @@ class ListBuffer[A]
     this
   }
 
-  private def insertAfter(p: Predecessor[A], it: Iterator[A]): Predecessor[A] = {
-    var prev = p
-    val follow = getNext(prev)
-    while (it.hasNext) {
-      len += 1
-      val next = (it.next() :: follow).asInstanceOf[::[A]]
-      if(prev eq null) first = next else prev.next = next
-      prev = next
+  // `fresh` must be a `ListBuffer` that only we have access to
+  private def insertAfter(prev: Predecessor[A], fresh: ListBuffer[A]): Unit = {
+    if (!fresh.isEmpty) {
+      val follow = getNext(prev)
+      if (prev eq null) first = fresh.first else prev.next = fresh.first
+      fresh.last0.next = follow
+      len += fresh.length
     }
-    if ((prev ne null) && prev.next.isEmpty) last0 = prev
-    prev
   }
 
   def insertAll(idx: Int, elems: IterableOnce[A]): Unit = {
-    ensureUnaliased()
+    if (idx < 0 || idx > len) throw new IndexOutOfBoundsException(s"$idx is out of bounds (min 0, max ${len-1})")
     val it = elems.iterator
     if (it.hasNext) {
-      ensureUnaliased()
-      if (idx < 0 || idx > len) throw new IndexOutOfBoundsException(s"$idx is out of bounds (min 0, max ${len-1})")
-      if (idx == len) ++=(elems)
-      else insertAfter(locate(idx), it)
+      if (idx == len) addAll(it)
+      else {
+        val fresh = new ListBuffer[A].freshFrom(it)
+        ensureUnaliased()
+        insertAfter(locate(idx), fresh)
+      }
     }
   }
 
@@ -275,15 +296,17 @@ class ListBuffer[A]
   }
 
   def mapInPlace(f: A => A): this.type = {
-    ensureUnaliased()
+    mutationCount += 1
     val buf = new ListBuffer[A]
     for (elem <- this) buf += f(elem)
     first = buf.first
     last0 = buf.last0
+    aliased = false // we just assigned from a new instance
     this
   }
 
   def flatMapInPlace(f: A => IterableOnce[A]): this.type = {
+    mutationCount += 1
     var src = first
     var dst: List[A] = null
     last0 = null
@@ -299,6 +322,7 @@ class ListBuffer[A]
       src = src.tail
     }
     first = if(dst eq null) Nil else dst
+    aliased = false // we just rebuilt a fresh, unaliased instance
     this
   }
 
@@ -322,12 +346,25 @@ class ListBuffer[A]
   }
 
   def patchInPlace(from: Int, patch: collection.IterableOnce[A], replaced: Int): this.type = {
-    val i = math.min(math.max(from, 0), length)
-    val n = math.min(math.max(replaced, 0), length)
-    ensureUnaliased()
-    val p = locate(i)
-    removeAfter(p, math.min(n, len - i))
-    insertAfter(p, patch.iterator)
+    val _len = len
+    val _from = math.max(from, 0)         // normalized
+    val _replaced = math.max(replaced, 0) // normalized
+    val it = patch.iterator
+
+    val nonEmptyPatch = it.hasNext
+    val nonEmptyReplace = (_from < _len) && (_replaced > 0)
+
+    // don't want to add a mutation or check aliasing (potentially expensive)
+    // if there's no patching to do
+    if (nonEmptyPatch || nonEmptyReplace) {
+      val fresh = new ListBuffer[A].freshFrom(it)
+      ensureUnaliased()
+      val i = math.min(_from, _len)
+      val n = math.min(_replaced, _len)
+      val p = locate(i)
+      removeAfter(p, math.min(n, _len - i))
+      insertAfter(p, fresh)
+    }
     this
   }
 
@@ -350,6 +387,7 @@ class ListBuffer[A]
    */
   override def lastOption: Option[A] = if (last0 eq null) None else Some(last0.head)
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "ListBuffer"
 
 }
@@ -357,7 +395,7 @@ class ListBuffer[A]
 @SerialVersionUID(3L)
 object ListBuffer extends StrictOptimizedSeqFactory[ListBuffer] {
 
-  def from[A](coll: collection.IterableOnce[A]): ListBuffer[A] = new ListBuffer[A] ++= coll
+  def from[A](coll: collection.IterableOnce[A]): ListBuffer[A] = new ListBuffer[A].freshFrom(coll)
 
   def newBuilder[A]: Builder[A, ListBuffer[A]] = new GrowableBuilder(empty[A])
 

@@ -1,7 +1,7 @@
 // scalac: -opt:l:inline -opt-inline-from:**
 //
 /*
- * filter: inliner warnings;
+ * filter: optimizer warnings;
  */
 import java.lang.Thread.holdsLock
 import scala.collection.mutable.StringBuilder
@@ -328,9 +328,7 @@ class C2 extends T
 object O2 extends T
 
 object Test extends App {
-  def check(name: String, result: Boolean): Unit = {
-    println("%-10s %s" format (name +":", if (result) "OK" else "FAILED"))
-  }
+  def check(name: String, result: Boolean): Unit = println("%-10s %s".format(name +":", if (result) "OK" else "FAILED"))
 
   val c1 = new C1
   check("c1.f1",   c1.f1)

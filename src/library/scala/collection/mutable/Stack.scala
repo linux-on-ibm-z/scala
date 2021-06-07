@@ -12,7 +12,7 @@
 
 package scala.collection.mutable
 
-import scala.annotation.migration
+import scala.annotation.{migration, nowarn}
 import scala.collection.generic.DefaultSerializable
 import scala.collection.{IterableFactoryDefaults, IterableOnce, SeqFactory, StrictOptimizedSeqFactory, StrictOptimizedSeqOps}
 
@@ -43,6 +43,7 @@ class Stack[A] protected (array: Array[AnyRef], start: Int, end: Int)
 
   override def iterableFactory: SeqFactory[Stack] = Stack
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "Stack"
 
   /**
@@ -81,7 +82,7 @@ class Stack[A] protected (array: Array[AnyRef], start: Int, end: Int)
     * Removes the top element from this stack and return it
     *
     * @return
-    * @throws java.util.NoSuchElementException when stack is empty
+    * @throws NoSuchElementException when stack is empty
     */
   def pop(): A = removeHead()
 
@@ -104,7 +105,7 @@ class Stack[A] protected (array: Array[AnyRef], start: Int, end: Int)
     *  the element from the stack. An error is signaled if there is no
     *  element on the stack.
     *
-    *  @throws java.util.NoSuchElementException
+    *  @throws NoSuchElementException
     *  @return the top element
     */
   @`inline` final def top: A = head

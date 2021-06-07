@@ -25,13 +25,13 @@ class AssertThrowsTest {
   class Bar extends Exception
 
   @Test
-  def catchFoo = assertThrows[Foo] { throw new Foo }
+  def catchFoo(): Unit = assertThrows[Foo] { throw new Foo }
 
   @Test
-  def catchSubclass = assertThrows[Foo] { throw new SubFoo }
+  def catchSubclass(): Unit = assertThrows[Foo] { throw new SubFoo }
 
   @Test
-  def wrongThrow =
+  def wrongThrow(): Unit =
     assertTrue("Wrong exception thrown", {
       try {
         assertThrows[Foo] { throw new Bar }
@@ -44,7 +44,7 @@ class AssertThrowsTest {
     })
 
   @Test
-  def errorIfNoThrow: Unit = {
+  def errorIfNoThrow(): Unit = {
     try {
       assertThrows[Foo] { () }
     } catch {
@@ -62,7 +62,7 @@ class AssertThrowsTest {
         assertEquals(1, ae.getSuppressed.length)
         assertEquals("Exception failed check: scala.tools.testkit.AssertThrowsTest$Foo", ae.getMessage)
         assertEquals(classOf[Foo], ae.getSuppressed.head.getClass)
-      case t: Throwable => fail("Expected an AssertionError: $t")
+      case t: Throwable => fail(s"Expected an AssertionError: $t")
     }
 
   @Test
@@ -74,6 +74,6 @@ class AssertThrowsTest {
         assertEquals(1, ae.getSuppressed.length)
         assertEquals("Wrong exception: expected scala.tools.testkit.AssertThrowsTest$Foo but was scala.tools.testkit.AssertThrowsTest$Bar", ae.getMessage)
         assertEquals(classOf[Bar], ae.getSuppressed.head.getClass)
-      case t: Throwable => fail("Expected an AssertionError: $t")
+      case t: Throwable => fail(s"Expected an AssertionError: $t")
     }
 }

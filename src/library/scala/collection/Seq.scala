@@ -15,6 +15,7 @@ package scala.collection
 import scala.collection.immutable.Range
 import scala.util.hashing.MurmurHash3
 import Searching.{Found, InsertionPoint, SearchResult}
+import scala.annotation.nowarn
 
 /** Base trait for sequence collections
   *
@@ -29,25 +30,19 @@ trait Seq[+A]
 
   override def iterableFactory: SeqFactory[Seq] = Seq
 
-  /** Method called from equality methods, so that user-defined subclasses can
-    *  refuse to be equal to other collections of the same kind.
-    *  @param   that   The object with which this $coll should be compared
-    *  @return  `true`, if this $coll can possibly equal `that`, `false` otherwise. The test
-    *           takes into consideration only the run-time types of objects but ignores their elements.
-    */
   def canEqual(that: Any): Boolean = true
 
-  override def equals(o: scala.Any): Boolean = this.eq(o.asInstanceOf[AnyRef]) || (
-    o match {
-      case it: Seq[A] => (it eq this) || (it canEqual this) && sameElements(it)
+  override def equals(o: Any): Boolean =
+    (this eq o.asInstanceOf[AnyRef]) || (o match {
+      case seq: Seq[A] if seq.canEqual(this) => sameElements(seq)
       case _ => false
-    }
-  )
+    })
 
   override def hashCode(): Int = MurmurHash3.seqHash(toIterable)
 
   override def toString(): String = super[Iterable].toString()
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "Seq"
 }
 
@@ -284,7 +279,7 @@ trait SeqOps[+A, +CC[_], +C] extends Any
     * @param    idx     the index to test
     * @return   `true` if this $coll contains an element at position `idx`, `false` otherwise.
     */
-  def isDefinedAt(idx: Int): Boolean = (idx >= 0) && (idx < length)
+  def isDefinedAt(idx: Int): Boolean = idx >= 0 && lengthIs > idx
 
   /** A copy of this $coll with an element value appended until a given target length is reached.
    *
@@ -297,17 +292,19 @@ trait SeqOps[+A, +CC[_], +C] extends Any
    */
   def padTo[B >: A](len: Int, elem: B): CC[B] = iterableFactory.from(new View.PadTo(this, len, elem))
 
-  /** Computes length of longest segment whose elements all satisfy some predicate.
+  /** Computes the length of the longest segment that starts from the first element
+    *  and whose elements all satisfy some predicate.
     *
     *  $mayNotTerminateInf
     *
     *  @param   p     the predicate used to test elements.
-    *  @return  the length of the longest segment of this $coll such that
-    *           every element of the segment satisfies the predicate `p`.
+    *  @return  the length of the longest segment of this $coll that starts from the first element
+    *           such that every element of the segment satisfies the predicate `p`.
     */
   final def segmentLength(p: A => Boolean): Int = segmentLength(p, 0)
 
-  /** Computes length of longest segment whose elements all satisfy some predicate.
+  /** Computes the length of the longest segment that starts from some index
+    *  and whose elements all satisfy some predicate.
     *
     *  $mayNotTerminateInf
     *
@@ -517,7 +514,7 @@ trait SeqOps[+A, +CC[_], +C] extends Any
    *  @return  `true` if this $coll contains a slice with the same elements
    *           as `that`, otherwise `false`.
    */
-  def containsSlice[B](that: Seq[B]): Boolean = indexOfSlice(that) != -1
+  def containsSlice[B >: A](that: Seq[B]): Boolean = indexOfSlice(that) != -1
 
   /** Tests whether this $coll contains a given value as an element.
    *  $mayNotTerminateInf
@@ -860,12 +857,16 @@ trait SeqOps[+A, +CC[_], +C] extends Any
   def diff[B >: A](that: Seq[B]): C = {
     val occ = occCounts(that)
     fromSpecific(iterator.filter { x =>
-      val ox = occ(x)  // Avoid multiple map lookups
-      if (ox == 0) true
-      else {
-        occ(x) = ox - 1
-        false
+      var include = false
+      occ.updateWith(x) {
+        case None => {
+          include = true
+          None
+        }
+        case Some(1) => None
+        case Some(n) => Some(n - 1)
       }
+      include
     })
   }
 
@@ -881,11 +882,16 @@ trait SeqOps[+A, +CC[_], +C] extends Any
   def intersect[B >: A](that: Seq[B]): C = {
     val occ = occCounts(that)
     fromSpecific(iterator.filter { x =>
-      val ox = occ(x)  // Avoid multiple map lookups
-      if (ox > 0) {
-        occ(x) = ox - 1
-        true
-      } else false
+      var include = true
+      occ.updateWith(x) {
+        case None => {
+          include = false
+          None
+        }
+        case Some(1) => None
+        case Some(n) => Some(n - 1)
+      }
+      include
     })
   }
 
@@ -923,8 +929,11 @@ trait SeqOps[+A, +CC[_], +C] extends Any
   }
 
   protected[collection] def occCounts[B](sq: Seq[B]): mutable.Map[B, Int] = {
-    val occ = new mutable.HashMap[B, Int]().withDefaultValue(0)
-    for (y <- sq) occ(y) += 1
+    val occ = new mutable.HashMap[B, Int]()
+    for (y <- sq) occ.updateWith(y) {
+      case None => Some(1)
+      case Some(n) => Some(n + 1)
+    }
     occ
   }
 

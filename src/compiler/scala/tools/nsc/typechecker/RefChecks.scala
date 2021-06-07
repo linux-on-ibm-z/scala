@@ -15,36 +15,28 @@ package typechecker
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.tools.nsc.Reporting.WarningCategory
 import scala.tools.nsc.settings.ScalaVersion
 import scala.tools.nsc.settings.NoScalaVersion
-
 import symtab.Flags._
 import transform.Transform
 
-/** <p>
- *    Post-attribution checking and transformation.
- *  </p>
- *  <p>
- *    This phase performs the following checks.
- *  </p>
- *  <ul>
- *    <li>All overrides conform to rules.</li>
- *    <li>All type arguments conform to bounds.</li>
- *    <li>All type variable uses conform to variance annotations.</li>
- *    <li>No forward reference to a term symbol extends beyond a value definition.</li>
- *  </ul>
- *  <p>
- *    It performs the following transformations.
- *  </p>
- *  <ul>
- *   <li>Local modules are replaced by variables and classes</li>
- *   <li>Calls to case factory methods are replaced by new's.</li>
- *   <li>Eliminate branches in a conditional if the condition is a constant</li>
- *  </ul>
+/** Post-attribution checking and transformation.
+ *
+ *  This phase checks the following postconditions:
+ *
+ *  - All overrides conform to rules.
+ *  - All type arguments conform to bounds.
+ *  - Every use of a type variable conforms to the variance annotation of that variable.
+ *  - No forward reference to a term symbol extends beyond a value definition.
+ *
+ *  It performs the following transformations:
+ *
+ *  - Local modules are replaced by variables and classes.
+ *  - Calls to case factory methods are replaced by new's.
+ *  - Eliminate branches in a conditional if the condition is a constant.
  *
  *  @author  Martin Odersky
- *
- *  @todo    Check whether we always check type parameter bounds.
  */
 abstract class RefChecks extends Transform {
 
@@ -61,41 +53,20 @@ abstract class RefChecks extends Transform {
   def newTransformer(unit: CompilationUnit): RefCheckTransformer =
     new RefCheckTransformer(unit)
 
-  val toJavaRepeatedParam  = new SubstSymMap(RepeatedParamClass -> JavaRepeatedParamClass)
-  val toScalaRepeatedParam = new SubstSymMap(JavaRepeatedParamClass -> RepeatedParamClass)
+  val toJavaRepeatedParam  = SubstSymMap(RepeatedParamClass -> JavaRepeatedParamClass)
+  val toScalaRepeatedParam = SubstSymMap(JavaRepeatedParamClass -> RepeatedParamClass)
 
   def accessFlagsToString(sym: Symbol) = flagsToString(
     sym getFlag (PRIVATE | PROTECTED),
     if (sym.hasAccessBoundary) "" + sym.privateWithin.name else ""
   )
 
-  def overridesTypeInPrefix(tp1: Type, tp2: Type, prefix: Type, isModuleOverride: Boolean): Boolean = (tp1.dealiasWiden, tp2.dealiasWiden) match {
-    case (MethodType(List(), rtp1), NullaryMethodType(rtp2)) =>
-      rtp1 <:< rtp2
-    case (NullaryMethodType(rtp1), MethodType(List(), rtp2)) =>
-      rtp1 <:< rtp2
-
-    // all this module business would be so much simpler if we moduled^w modelled a module as a class and an accessor, like we do for fields
-    case (TypeRef(_, sym, _), _) if sym.isModuleClass =>
-      overridesTypeInPrefix(NullaryMethodType(tp1), tp2, prefix, isModuleOverride)
-    case (_, TypeRef(_, sym, _)) if sym.isModuleClass =>
-      overridesTypeInPrefix(tp1, NullaryMethodType(tp2), prefix, isModuleOverride)
-
-    case _ =>
-      def classBoundAsSeen(tp: Type) = tp.typeSymbol.classBound.asSeenFrom(prefix, tp.typeSymbol.owner)
-      (tp1 <:< tp2) || isModuleOverride && (
-        // Object override check. This requires that both the overridden and the overriding member are object
-        // definitions. The overriding module type is allowed to replace the original one with the same name
-        // as long as it conform to the original non-singleton type.
-        tp1.typeSymbol.isModuleClass && tp2.typeSymbol.isModuleClass && {
-          val cb1 = classBoundAsSeen(tp1)
-          val cb2 = classBoundAsSeen(tp2)
-          (cb1 <:< cb2) && {
-            log("Allowing %s to override %s because %s <:< %s".format(tp1, tp2, cb1, cb2))
-            true
-          }
-        }
-      )
+  def overridesTypeInPrefix(tp1: Type, tp2: Type, prefix: Type): Boolean = (tp1.dealiasWiden, tp2.dealiasWiden) match {
+    case (MethodType(List(), rtp1), NullaryMethodType(rtp2)) => rtp1 <:< rtp2
+    case (NullaryMethodType(rtp1), MethodType(List(), rtp2)) => rtp1 <:< rtp2
+    case (TypeRef(_, sym, _), _) if sym.isModuleClass        => overridesTypeInPrefix(NullaryMethodType(tp1), tp2, prefix)
+    case (_, TypeRef(_, sym, _)) if sym.isModuleClass        => overridesTypeInPrefix(tp1, NullaryMethodType(tp2), prefix)
+    case _                                                   => tp1 <:< tp2
   }
 
   private val separatelyCompiledScalaSuperclass = perRunCaches.newAnyRefMap[Symbol, Unit]()
@@ -107,7 +78,7 @@ abstract class RefChecks extends Transform {
     false
   }
 
-  class RefCheckTransformer(unit: CompilationUnit) extends Transformer {
+  class RefCheckTransformer(unit: CompilationUnit) extends AstTransformer {
 
     var localTyper: analyzer.Typer = typer
     var currentApplication: Tree = EmptyTree
@@ -131,6 +102,9 @@ abstract class RefChecks extends Transform {
 
       !seen
     }
+
+    private def refchecksWarning(pos: Position, msg: String, cat: WarningCategory): Unit =
+      runReporting.warning(pos, msg, cat, currentOwner)
 
     // only one overloaded alternative is allowed to define default arguments
     private def checkOverloadedRestrictions(clazz: Symbol, defaultClass: Symbol): Unit = {
@@ -174,12 +148,12 @@ abstract class RefChecks extends Transform {
       }
 
       // This has become noisy with implicit classes.
-      if (settings.warnPolyImplicitOverload && settings.developer) {
+      if (settings.isDeveloper && settings.warnPolyImplicitOverload) {
         clazz.info.decls.foreach(sym => if (sym.isImplicit && sym.typeParams.nonEmpty) {
           // implicit classes leave both a module symbol and a method symbol as residue
           val alts = clazz.info.decl(sym.name).alternatives filterNot (_.isModule)
           if (alts.size > 1)
-            alts foreach (x => reporter.warning(x.pos, "parameterized overloaded implicit methods are not visible as view bounds"))
+            alts foreach (x => refchecksWarning(x.pos, "parameterized overloaded implicit methods are not visible as view bounds", WarningCategory.LintPolyImplicitOverload))
         })
       }
     }
@@ -272,6 +246,7 @@ abstract class RefChecks extends Transform {
      *     that are not implemented in a subclass.
      *  4. Check that every member with an `override` modifier
      *     overrides some other member.
+     *  5. Check that the nested class do not shadow other nested classes from outer class's parent.
      */
     private def checkAllOverrides(clazz: Symbol, typesOnly: Boolean = false): Unit = {
       val self = clazz.thisType
@@ -309,10 +284,10 @@ abstract class RefChecks extends Transform {
         macroStr + member.defStringSeenAs(self.memberInfo(member)) + location
       }
 
-      /** Check that all conditions for overriding `other` by `member` of class `clazz` are met.
-        *
-        * TODO: error messages could really be improved, including how they are composed
-        */
+      /* Check that all conditions for overriding `other` by `member` of class `clazz` are met.
+       *
+       * TODO: error messages could really be improved, including how they are composed
+       */
       def checkOverride(pair: SymbolPair): Unit = {
         import pair.{highType, lowType, highInfo, rootType}
 
@@ -328,7 +303,7 @@ abstract class RefChecks extends Transform {
         def isNeitherInClass = memberClass != clazz && otherClass != clazz
 
         val indent = "  "
-        def overriddenWithAddendum(msg: String, foundReq: Boolean = settings.debug.value): String = {
+        def overriddenWithAddendum(msg: String, foundReq: Boolean = settings.isDebug): String = {
           val isConcreteOverAbstract =
             (otherClass isSubClass memberClass) && other.isDeferred && !member.isDeferred
           val addendum =
@@ -371,10 +346,10 @@ abstract class RefChecks extends Transform {
 
         def overrideErrorConcreteMissingOverride() = {
           if (isNeitherInClass && !(otherClass isSubClass memberClass))
-            emitOverrideError(clazz + " inherits conflicting members:\n"
-                               + indent + infoStringWithLocation(other) + " and\n"
-                               + indent + infoStringWithLocation(member) + "\n"
-                               + indent + s"(note: this can be resolved by declaring an `override` in $clazz.)")
+            emitOverrideError(sm"""|$clazz inherits conflicting members:
+                                   |$indent${infoStringWithLocation(other)} and
+                                   |$indent${infoStringWithLocation(member)}
+                                   |$indent(note: this can be resolved by declaring an `override` in $clazz.)""")
           else
             overrideErrorWithMemberInfo("`override` modifier required to override concrete member:")
         }
@@ -408,7 +383,7 @@ abstract class RefChecks extends Transform {
           def isOverrideAccessOK = member.isPublic || {      // member is public, definitely same or relaxed access
             (!other.isProtected || member.isProtected) &&    // if o is protected, so is m
             ((!isRootOrNone(ob) && ob.hasTransOwner(mb)) ||  // m relaxes o's access boundary
-             other.isJavaDefined)                           // overriding a protected java member, see #3946
+             (other.isJavaDefined && other.isProtected))     // overriding a protected java member, see #3946 #12349
           }
           if (!isOverrideAccessOK) {
             overrideAccessError()
@@ -428,7 +403,7 @@ abstract class RefChecks extends Transform {
             if (!(memberOverrides || other.isDeferred) && !member.isSynthetic) {
               overrideErrorConcreteMissingOverride()
             } else if (other.isAbstractOverride && other.isIncompleteIn(clazz) && !member.isAbstractOverride) {
-              overrideErrorWithMemberInfo("`abstract override' modifiers required to override:")
+              overrideErrorWithMemberInfo("`abstract override` modifiers required to override:")
             }
             else if (memberOverrides && (other hasFlag ACCESSOR) && !(other hasFlag STABLE | DEFERRED)) {
               // TODO: this is not covered by the spec.
@@ -439,7 +414,7 @@ abstract class RefChecks extends Transform {
                      !member.isDeferred && !other.isDeferred &&
                      intersectionIsEmpty(member.extendedOverriddenSymbols, other.extendedOverriddenSymbols)) {
               overrideErrorWithMemberInfo("cannot override a concrete member without a third member that's overridden by both " +
-                                          "(this rule is designed to prevent ``accidental overrides'')")
+                                          "(this rule is designed to prevent accidental overrides)")
             } else if (other.isStable && !member.isStable) { // (1.4)
               overrideErrorWithMemberInfo("stable, immutable value required to override:")
             } else if (member.isValue && member.isLazy &&
@@ -457,10 +432,16 @@ abstract class RefChecks extends Transform {
               // Don't bother users with deprecations caused by classes they inherit.
               // Only warn for the pair that has one leg in `clazz`.
               if (clazz == memberClass) checkOverrideDeprecated()
-              if (settings.warnNullaryOverride) {
-                def javaDetermined(sym: Symbol) = sym.isJavaDefined || isUniversalMember(sym)
-                if (other.paramss.isEmpty && !member.paramss.isEmpty && !javaDetermined(member) && !member.overrides.exists(javaDetermined))
-                  reporter.warning(member.pos, "non-nullary method overrides nullary method")
+              def javaDetermined(sym: Symbol) = sym.isJavaDefined || isUniversalMember(sym)
+              if (!member.hasAttachment[NullaryOverrideAdapted.type]
+                  && other.paramss.isEmpty && !member.paramss.isEmpty
+                  && !javaDetermined(member) && !member.overrides.exists(javaDetermined)
+              ) {
+                val msg = "method with a single empty parameter list overrides method without any parameter list"
+                if (currentRun.isScala3)
+                  overrideErrorWithMemberInfo(msg)
+                else
+                  refchecksWarning(member.pos, msg, WarningCategory.OtherNullaryOverride)
               }
             }
           }
@@ -508,7 +489,7 @@ abstract class RefChecks extends Transform {
         def checkOverrideTerm(): Unit = {
           member.cookJavaRawInfo() // #11584, #11840
           other.cookJavaRawInfo() // #2454
-          if (!overridesTypeInPrefix(lowType, highType, rootType, member.isModuleOrModuleClass && other.isModuleOrModuleClass)) { // 8
+          if (!overridesTypeInPrefix(lowType, highType, rootType)) { // 8
             overrideTypeError()
             explainTypes(lowType, highType)
           }
@@ -537,12 +518,12 @@ abstract class RefChecks extends Transform {
             val since   = if (version.isEmpty) version else s" (since $version)"
             val message = other.deprecatedOverridingMessage map (msg => s": $msg") getOrElse ""
             val report  = s"overriding ${other.fullLocationString} is deprecated$since$message"
-            currentRun.reporting.deprecationWarning(member.pos, other, report, version)
+            runReporting.deprecationWarning(member.pos, other, member, report, version)
           }
         }
       }
 
-      val opc = new overridingPairs.Cursor(clazz)
+      val opc = new overridingPairs.PairsCursor(clazz)
       while (opc.hasNext) {
         if (!opc.high.isClass)
           checkOverride(opc.currentPair)
@@ -562,8 +543,8 @@ abstract class RefChecks extends Transform {
         def abstractClassError(mustBeMixin: Boolean, msg: String): Unit = {
           def prelude = (
             if (clazz.isAnonymousClass || clazz.isModuleClass) "object creation impossible."
-            else if (mustBeMixin) clazz + " needs to be a mixin."
-            else clazz + " needs to be abstract."
+            else if (mustBeMixin) s"$clazz needs to be a mixin."
+            else s"$clazz needs to be abstract."
           )
 
           if (abstractErrors.isEmpty) abstractErrors ++= List(prelude, msg)
@@ -832,7 +813,21 @@ abstract class RefChecks extends Transform {
           }
           member resetFlag (OVERRIDE | ABSOVERRIDE)  // Any Override
         }
-    }
+
+      // 5. Check that the nested class do not shadow other nested classes from outer class's parent
+      def checkNestedClassShadow(): Unit =
+        if (clazz.isNestedClass && !clazz.isModuleClass) {
+          val overridden = clazz.owner.ancestors
+            .map(a => clazz.matchingSymbol(a, clazz.owner.thisType))
+            .filter(c => c.exists && c.isClass)
+          overridden foreach { sym2 =>
+            def msg(what: String) = s"shadowing a nested class of a parent is $what but $clazz shadows $sym2 defined in ${sym2.owner}; rename the class to something else"
+            if (currentRun.isScala3) reporter.error(clazz.pos, msg("unsupported"))
+            else runReporting.deprecationWarning(clazz.pos, clazz, currentOwner, msg("deprecated"), "2.13.2")
+          }
+        }
+      checkNestedClassShadow()
+    } // end checkAllOverrides
 
   // Basetype Checking --------------------------------------------------------
 
@@ -893,9 +888,9 @@ abstract class RefChecks extends Transform {
         case ClassInfoType(parents, _, clazz) => "supertype "+intersectionType(parents, clazz.owner)
         case _                                => "type "+tp
       }
-      override def issueVarianceError(base: Symbol, sym: Symbol, required: Variance): Unit = {
+      override def issueVarianceError(base: Symbol, sym: Symbol, required: Variance, tpe: Type): Unit = {
         reporter.error(base.pos,
-          s"${sym.variance} $sym occurs in $required position in ${tpString(base.info)} of $base")
+          s"${sym.variance} $sym occurs in $required position in ${tpString(tpe)} of $base")
       }
     }
 
@@ -956,7 +951,7 @@ abstract class RefChecks extends Transform {
 
     def checkImplicitViewOptionApply(pos: Position, fn: Tree, args: List[Tree]): Unit = if (settings.warnOptionImplicit) (fn, args) match {
       case (tap@TypeApply(fun, targs), List(view: ApplyImplicitView)) if fun.symbol == currentRun.runDefinitions.Option_apply =>
-        reporter.warning(pos, s"Suspicious application of an implicit view (${view.fun}) in the argument to Option.apply.") // scala/bug#6567
+        refchecksWarning(pos, s"Suspicious application of an implicit view (${view.fun}) in the argument to Option.apply.", WarningCategory.LintOptionImplicit) // scala/bug#6567
       case _ =>
     }
 
@@ -987,7 +982,7 @@ abstract class RefChecks extends Transform {
       def onSyms[T](f: List[Symbol] => T) = f(List(receiver, actual))
 
       // @MAT normalize for consistency in error message, otherwise only part is normalized due to use of `typeSymbol`
-      def typesString = normalizeAll(qual.tpe.widen)+" and "+normalizeAll(other.tpe.widen)
+      def typesString = s"${normalizeAll(qual.tpe.widen)} and ${normalizeAll(other.tpe.widen)}"
 
       // TODO: this should probably be used in more type comparisons in checkSensibleEquals
       def erasedClass(tp: Type) = erasure.javaErasure(tp).typeSymbol
@@ -1048,7 +1043,7 @@ abstract class RefChecks extends Transform {
 
       def nonSensibleWarning(what: String, alwaysEqual: Boolean) = {
         val msg = alwaysEqual == (name == nme.EQ || name == nme.eq)
-        reporter.warning(pos, s"comparing $what using `${name.decode}` will always yield $msg")
+        refchecksWarning(pos, s"comparing $what using `${name.decode}` will always yield $msg", WarningCategory.Other)
         isNonSensible = true
       }
       def nonSensible(pre: String, alwaysEqual: Boolean) =
@@ -1063,7 +1058,7 @@ abstract class RefChecks extends Transform {
       }
       def unrelatedTypes() = if (!isNonSensible) {
         val weaselWord = if (isEitherValueClass) "" else " most likely"
-        reporter.warning(pos, s"$typesString are unrelated: they will$weaselWord $unrelatedMsg")
+        refchecksWarning(pos, s"$typesString are unrelated: they will$weaselWord $unrelatedMsg", WarningCategory.Other)
       }
 
       if (nullCount == 2) // null == null
@@ -1142,20 +1137,51 @@ abstract class RefChecks extends Transform {
         else warnIfLubless()
       }
     }
+
+    private def checkSensibleAnyEquals(pos: Position, qual: Tree, name: Name, sym: Symbol, other: Tree) = {
+      def underlyingClass(tp: Type): Symbol = {
+        val sym = tp.widen.typeSymbol
+        if (sym.isAbstractType) underlyingClass(sym.info.upperBound)
+        else sym
+      }
+      val receiver = underlyingClass(qual.tpe)
+      val actual   = underlyingClass(other.tpe)
+      def typesString = "" + normalizeAll(qual.tpe.widen) + " and " + normalizeAll(other.tpe.widen)
+      def nonSensiblyEquals() = {
+        refchecksWarning(pos, s"comparing values of types $typesString using `${name.decode}` unsafely bypasses cooperative equality; use `==` instead", WarningCategory.OtherNonCooperativeEquals)
+      }
+      def isScalaNumber(s: Symbol) = s isSubClass ScalaNumberClass
+      def isJavaNumber(s: Symbol)  = s isSubClass JavaNumberClass
+      def isAnyNumber(s: Symbol)   = isScalaNumber(s) || isJavaNumber(s)
+      def isNumeric(s: Symbol)     = isNumericValueClass(unboxedValueClass(s)) || isAnyNumber(s)
+      def isReference(s: Symbol)   = (unboxedValueClass(s) isSubClass AnyRefClass) || (s isSubClass ObjectClass)
+      def isUnit(s: Symbol)        = unboxedValueClass(s) == UnitClass
+      def isNumOrNonRef(s: Symbol) = isNumeric(s) || (!isReference(s) && !isUnit(s))
+      if (isNumeric(receiver) && isNumOrNonRef(actual)) {
+        if (receiver == actual) ()
+        else nonSensiblyEquals()
+      }
+      else if ((sym == Any_equals || sym == Object_equals) && isNumOrNonRef(actual) && !isReference(receiver)) {
+        nonSensiblyEquals()
+      }
+    }
+
     /** Sensibility check examines flavors of equals. */
     def checkSensible(pos: Position, fn: Tree, args: List[Tree]) = fn match {
       case Select(qual, name @ (nme.EQ | nme.NE | nme.eq | nme.ne)) if args.length == 1 && isObjectOrAnyComparisonMethod(fn.symbol) && (!currentOwner.isSynthetic || currentOwner.isAnonymousFunction) =>
         checkSensibleEquals(pos, qual, name, fn.symbol, args.head)
+      case Select(qual, name @ nme.equals_) if args.length == 1 && (!currentOwner.isSynthetic || currentOwner.isAnonymousFunction) =>
+        checkSensibleAnyEquals(pos, qual, name, fn.symbol, args.head)
       case _ =>
     }
 
     // scala/bug#6276 warn for trivial recursion, such as `def foo = foo` or `val bar: X = bar`, which come up more frequently than you might think.
     // TODO: Move to abide rule. Also, this does not check that the def is final or not overridden, for example
     def checkInfiniteLoop(sym: Symbol, rhs: Tree): Unit =
-      if (!sym.isValueParameter && sym.paramss.isEmpty) {
+      if (!sym.isValueParameter && sym.paramss.forall(_.isEmpty)) {
         rhs match {
-          case t@(Ident(_) | Select(This(_), _)) if t hasSymbolWhich (_.accessedOrSelf == sym) =>
-            reporter.warning(rhs.pos, s"${sym.fullLocationString} does nothing other than call itself recursively")
+          case Ident(_) | Select(This(_), _) | Apply(Select(This(_), _), _) if rhs hasSymbolWhich (_.accessedOrSelf == sym) =>
+            refchecksWarning(rhs.pos, s"${sym.fullLocationString} does nothing other than call itself recursively", WarningCategory.Other)
           case _ =>
         }
       }
@@ -1181,36 +1207,40 @@ abstract class RefChecks extends Transform {
       try {
         enterSyms(stats)
         var index = -1
-        stats flatMap { stat => index += 1; transformStat(stat, index) }
+        stats.mapConserve(stat => {
+          index += 1;
+          transformStat(stat, index)
+        }).filter(_ ne EmptyTree)
       }
       finally popLevel()
     }
 
+    private def showCurrentRef: String = {
+      val refsym = currentLevel.refsym
+      s"$refsym defined on line ${refsym.pos.line}"
+    }
 
-
-    def transformStat(tree: Tree, index: Int): List[Tree] = tree match {
+    def transformStat(tree: Tree, index: Int): Tree = tree match {
       case t if treeInfo.isSelfConstrCall(t) =>
         assert(index == 0, index)
-        try transform(tree) :: Nil
+        try transform(tree)
         finally if (currentLevel.maxindex > 0) {
-          // An implementation restriction to avoid VerifyErrors and lazyvals mishaps; see scala/bug#4717
-          debuglog("refsym = " + currentLevel.refsym)
-          reporter.error(currentLevel.refpos, "forward reference not allowed from self constructor invocation")
+          // An implementation restriction to avoid VerifyErrors and lazy vals mishaps; see scala/bug#4717
+          reporter.error(currentLevel.refpos, s"forward reference to $showCurrentRef not allowed from self constructor invocation")
         }
       case ValDef(_, _, _, _) =>
         val tree1 = transform(tree) // important to do before forward reference check
-        if (tree1.symbol.isLazy) tree1 :: Nil
+        if (tree1.symbol.isLazy) tree1
         else {
           val sym = tree.symbol
           if (sym.isLocalToBlock && index <= currentLevel.maxindex) {
-            debuglog("refsym = " + currentLevel.refsym)
-            reporter.error(currentLevel.refpos, "forward reference extends over definition of " + sym)
+            reporter.error(currentLevel.refpos, s"forward reference to $showCurrentRef extends over definition of $sym")
           }
-          tree1 :: Nil
+          tree1
         }
-      case Import(_, _)                                                                       => Nil
-      case DefDef(mods, _, _, _, _, _) if (mods hasFlag MACRO) || (tree.symbol hasFlag MACRO) => Nil
-      case _                                                                                  => transform(tree) :: Nil
+      case Import(_, _)                                                                       => EmptyTree
+      case DefDef(mods, _, _, _, _, _) if (mods hasFlag MACRO) || (tree.symbol hasFlag MACRO) => EmptyTree
+      case _                                                                                  => transform(tree)
     }
 
     /* Check whether argument types conform to bounds of type parameters */
@@ -1250,7 +1280,7 @@ abstract class RefChecks extends Transform {
       // If symbol is deprecated, and the point of reference is not enclosed
       // in either a deprecated member or a scala bridge method, issue a warning.
       if (sym.isDeprecated && !currentOwner.ownerChain.exists(x => x.isDeprecated))
-        currentRun.reporting.deprecationWarning(pos, sym)
+        runReporting.deprecationWarning(pos, sym, currentOwner)
 
       // Similar to deprecation: check if the symbol is marked with @migration
       // indicating it has changed semantics between versions.
@@ -1259,20 +1289,24 @@ abstract class RefChecks extends Transform {
           settings.Xmigration.value < ScalaVersion(sym.migrationVersion.get)
         catch {
           case e : NumberFormatException =>
-            reporter.warning(pos, s"${sym.fullLocationString} has an unparsable version number: ${e.getMessage()}")
+            refchecksWarning(pos, s"${sym.fullLocationString} has an unparsable version number: ${e.getMessage()}", WarningCategory.Other)
             // if we can't parse the format on the migration annotation just conservatively assume it changed
             true
         }
         if (changed)
-          reporter.warning(pos, s"${sym.fullLocationString} has changed semantics in version ${sym.migrationVersion.get}:\n${sym.migrationMessage.get}")
+          refchecksWarning(pos, s"${sym.fullLocationString} has changed semantics in version ${sym.migrationVersion.get}:\n${sym.migrationMessage.get}", WarningCategory.OtherMigration)
       }
       // See an explanation of compileTimeOnly in its scaladoc at scala.annotation.compileTimeOnly.
+      // async/await is expanded after erasure
       if (sym.isCompileTimeOnly && !inAnnotation && !currentOwner.ownerChain.exists(x => x.isCompileTimeOnly)) {
-        def defaultMsg =
-          sm"""Reference to ${sym.fullLocationString} should not have survived past type checking,
-              |it should have been processed and eliminated during expansion of an enclosing macro."""
-        // The getOrElse part should never happen, it's just here as a backstop.
-        reporter.error(pos, sym.compileTimeOnlyMessage getOrElse defaultMsg)
+        if (!async.deferCompileTimeOnlyError(sym)) {
+          def defaultMsg =
+            sm"""Reference to ${sym.fullLocationString} should not have survived past type checking,
+                |it should have been processed and eliminated during expansion of an enclosing macro."""
+          // The getOrElse part should never happen, it's just here as a backstop.
+          val msg = sym.compileTimeOnlyMessage getOrElse defaultMsg
+          reporter.error(pos, msg)
+        }
       }
     }
 
@@ -1283,7 +1317,7 @@ abstract class RefChecks extends Transform {
         && sym.accessedOrSelf.isVal
       )
       if (settings.warnDelayedInit && isLikelyUninitialized)
-        reporter.warning(pos, s"Selecting ${sym} from ${sym.owner}, which extends scala.DelayedInit, is likely to yield an uninitialized value")
+        refchecksWarning(pos, s"Selecting ${sym} from ${sym.owner}, which extends scala.DelayedInit, is likely to yield an uninitialized value", WarningCategory.LintDelayedinitSelect)
     }
 
     private def lessAccessible(otherSym: Symbol, memberSym: Symbol): Boolean = (
@@ -1315,9 +1349,10 @@ abstract class RefChecks extends Transform {
         if (memberSym.isDeferred) "may be unable to provide a concrete implementation of"
         else "may be unable to override"
 
-      reporter.warning(memberSym.pos,
+      refchecksWarning(memberSym.pos,
         s"""|${memberSym.fullLocationString}${comparison} references ${accessFlagsToString(otherSym)} ${otherSym}.
-            |Classes which cannot access ${otherSym.decodedName} ${cannot} ${memberSym.decodedName}.""".stripMargin
+            |Classes which cannot access ${otherSym.decodedName} ${cannot} ${memberSym.decodedName}.""".stripMargin,
+        WarningCategory.LintInaccessible
       )
     }
 
@@ -1354,9 +1389,10 @@ abstract class RefChecks extends Transform {
           symbol.allOverriddenSymbols.filter(sym =>
             !sym.isDeprecated && !sym.isDeferred && !sym.hasDeprecatedOverridingAnnotation && !sym.enclClass.hasDeprecatedInheritanceAnnotation)
         if(!concrOvers.isEmpty)
-          currentRun.reporting.deprecationWarning(
+          runReporting.deprecationWarning(
             tree.pos,
             symbol,
+            currentOwner,
             s"${symbol.toString} overrides concrete, non-deprecated symbol(s):    ${concrOvers.map(_.name.decode).mkString(", ")}", "")
       }
     }
@@ -1371,14 +1407,14 @@ abstract class RefChecks extends Transform {
         false
     }
 
-    private def checkTypeRef(tp: Type, tree: Tree, skipBounds: Boolean) = tp match {
+    private def checkTypeRef(tp: Type, tree: Tree, skipBounds: Boolean): Unit = tp match {
       case TypeRef(pre, sym, args) =>
         tree match {
           case tt: TypeTree if tt.original == null => // scala/bug#7783 don't warn about inferred types
                                                       // FIXME: reconcile this check with one in resetAttrs
           case _ => checkUndesiredProperties(sym, tree.pos)
         }
-        if(sym.isJavaDefined)
+        if (sym.isJavaDefined)
           sym.typeParams foreach (_.cookJavaRawInfo())
         if (!tp.isHigherKinded && !skipBounds)
           checkBounds(tree, pre, sym.owner, sym.typeParams, args)
@@ -1401,8 +1437,18 @@ abstract class RefChecks extends Transform {
     }
 
     private def applyRefchecksToAnnotations(tree: Tree): Unit = {
+      def checkVarArgs(tp: Type, tree: Tree): Unit = tp match {
+        case TypeRef(_, VarargsClass, _) =>
+          tree match {
+            case tt: TypeTree if tt.original == null => // same exception as in checkTypeRef
+            case _: DefDef =>
+            case _ => reporter.error(tree.pos, s"Only methods can be marked @varargs")
+          }
+        case _ =>
+      }
       def applyChecks(annots: List[AnnotationInfo]): List[AnnotationInfo] = if (annots.isEmpty) Nil else {
         annots.foreach { ann =>
+          checkVarArgs(ann.atp, tree)
           checkTypeRef(ann.atp, tree, skipBounds = false)
           checkTypeRefBounds(ann.atp, tree)
           if (ann.original != null && ann.original.hasExistingSymbol)
@@ -1453,39 +1499,47 @@ abstract class RefChecks extends Transform {
           reporter.error(sym.pos, s"${sym.name}: Only concrete methods can be marked @elidable.$rest")
         }
       }
-      if (currentRun.isScala213) checkIsElidable(tree.symbol)
+      checkIsElidable(tree.symbol)
+
+      def checkMember(sym: Symbol): Unit = {
+        sym.setAnnotations(applyChecks(sym.annotations))
+
+        // validate implicitNotFoundMessage and implicitAmbiguousMessage
+        if (settings.lintImplicitNotFound) {
+          def messageWarning(name: String)(warn: String) =
+            refchecksWarning(tree.pos, s"Invalid $name message for ${sym}${sym.locationString}:\n$warn", WarningCategory.LintImplicitNotFound)
+          analyzer.ImplicitNotFoundMsg.check(sym) foreach messageWarning("implicitNotFound")
+          analyzer.ImplicitAmbiguousMsg.check(sym) foreach messageWarning("implicitAmbiguous")
+        }
+
+        if (settings.warnSerialization && sym.isClass && sym.hasAnnotation(SerialVersionUIDAttr)) {
+          def warn(what: String) =
+            refchecksWarning(tree.pos, s"@SerialVersionUID has no effect on $what", WarningCategory.LintSerial)
+
+          if (sym.isTrait) warn("traits")
+          else if (!sym.isSerializable) warn("non-serializable classes")
+        }
+        if (!sym.isMethod && !sym.isConstructor)
+          checkNoThrows(sym.annotations)
+      }
+      def checkNoThrows(anns: List[AnnotationInfo]): Unit =
+        if (anns.exists(_.symbol == ThrowsClass))
+          reporter.error(tree.pos, s"`@throws` only allowed for methods and constructors")
 
       tree match {
         case m: MemberDef =>
-          val sym = m.symbol
-          sym.setAnnotations(applyChecks(sym.annotations))
-
-          // validate implicitNotFoundMessage and implicitAmbiguousMessage
-          if (settings.lintImplicitNotFound) {
-            def messageWarning(name: String)(warn: String) =
-              reporter.warning(tree.pos, s"Invalid $name message for ${sym}${sym.locationString}:\n$warn")
-            analyzer.ImplicitNotFoundMsg.check(sym) foreach messageWarning("implicitNotFound")
-            analyzer.ImplicitAmbiguousMsg.check(sym) foreach messageWarning("implicitAmbiguous")
-          }
-
-          if (settings.warnSerialization && sym.isClass && sym.hasAnnotation(SerialVersionUIDAttr)) {
-            def warn(what: String) =
-              reporter.warning(tree.pos, s"@SerialVersionUID has no effect on $what")
-
-            if (sym.isTrait) warn("traits")
-            else if (!sym.isSerializable) warn("non-serializable classes")
-          }
+          checkMember(m.symbol)
         case tpt@TypeTree() =>
-          if (tpt.original != null) {
-            tpt.original foreach {
+          if (tpt.original != null)
+            tpt.original.foreach {
               case dc@TypeTreeWithDeferredRefCheck() =>
                 applyRefchecksToAnnotations(dc.check()) // #2416
               case _ =>
             }
-          }
           if (!inPattern)
-            tree.setType(tree.tpe map {
+            tree.setType(tree.tpe.map {
               case AnnotatedType(anns, ul) =>
+                checkNoThrows(anns)
                 AnnotatedType(applyChecks(anns), ul)
               case tp => tp
             })
@@ -1506,6 +1560,7 @@ abstract class RefChecks extends Transform {
               // the companion class is actually not a ClassSymbol, but a reference to an abstract type.
               module.symbol.companionClass.isClass
             )
+        case x => throw new MatchError(x)
       }
 
       sym.name == nme.apply &&
@@ -1564,8 +1619,6 @@ abstract class RefChecks extends Transform {
 
       if (!sym.exists)
         devWarning("Select node has NoSymbol! " + tree + " / " + tree.tpe)
-      else if (sym.isLocalToThis)
-        varianceValidator.checkForEscape(sym, currentClass)
 
       def checkSuper(mix: Name) =
         // term should have been eliminated by super accessors
@@ -1612,9 +1665,10 @@ abstract class RefChecks extends Transform {
              sym.isGetter
           || sym.isDefaultGetter
           || sym.allOverriddenSymbols.exists(over => !(over.tpe.resultType =:= sym.tpe.resultType))
+          || sym.isArtifact
         )
         if (!isOk)
-          reporter.warning(sym.pos, s"side-effecting nullary methods are discouraged: suggest defining as `def ${sym.name.decode}()` instead")
+          refchecksWarning(sym.pos, s"side-effecting nullary methods are discouraged: suggest defining as `def ${sym.name.decode}()` instead", WarningCategory.LintNullaryUnit)
       case _ => ()
     }
 
@@ -1671,6 +1725,14 @@ abstract class RefChecks extends Transform {
 
           case Template(parents, self, body) =>
             localTyper = localTyper.atOwner(tree, currentOwner)
+            for (stat <- body) {
+              if (treeInfo.isPureExprForWarningPurposes(stat)) {
+                val msg = "a pure expression does nothing in statement position"
+                val clause = if (body.lengthCompare(1) > 0) "; multiline expressions may require enclosing parentheses" else ""
+                refchecksWarning(stat.pos, s"$msg$clause", WarningCategory.OtherPureStatement)
+              }
+            }
+
             validateBaseTypes(currentOwner)
             checkOverloadedRestrictions(currentOwner, currentOwner)
             // scala/bug#7870 default getters for constructors live in the companion module
@@ -1735,7 +1797,7 @@ abstract class RefChecks extends Transform {
             tree
 
           case treeInfo.WildcardStarArg(_) if !isRepeatedParamArg(tree) =>
-            reporter.error(tree.pos, "no `: _*' annotation allowed here\n"+
+            reporter.error(tree.pos, "no `: _*` annotation allowed here\n"+
               "(such annotations are only allowed in arguments to *-parameters)")
             tree
 
@@ -1756,7 +1818,41 @@ abstract class RefChecks extends Transform {
                            // probably not, until we allow parameterised extractors
             tree
 
+          case Block(stats, expr) =>
+            val (count, result0, adapted) =
+              expr match {
+                case Block(expr :: Nil, Literal(Constant(()))) => (1, expr, true)
+                case Literal(Constant(()))                     => (0, EmptyTree, false)
+                case _                                         => (1, EmptyTree, false)
+              }
+            val isMultiline = stats.lengthCompare(1 - count) > 0
 
+            def checkPure(t: Tree, supple: Boolean): Unit =
+              if (!analyzer.explicitlyUnit(t) && treeInfo.isPureExprForWarningPurposes(t)) {
+                val msg = "a pure expression does nothing in statement position"
+                val parens = if (isMultiline) "multiline expressions might require enclosing parentheses" else ""
+                val discard = if (adapted) "; a value can be silently discarded when Unit is expected" else ""
+                val text =
+                  if (supple) s"$parens$discard"
+                  else if (!parens.isEmpty) s"$msg; $parens" else msg
+                refchecksWarning(t.pos, text, WarningCategory.OtherPureStatement)
+              }
+            // sanity check block for unintended expr placement
+            stats.foreach(checkPure(_, supple = false))
+            if (result0.nonEmpty) checkPure(result0, supple = true)
+
+            def checkImplicitlyAdaptedBlockResult(t: Tree): Unit =
+              expr match {
+                case treeInfo.Applied(f, _, _) if f.symbol != null && f.symbol.isImplicit =>
+                  f.symbol.paramLists match {
+                    case (p :: Nil) :: _ if p.isByNameParam => refchecksWarning(t.pos, s"Block result was adapted via implicit conversion (${f.symbol}) taking a by-name parameter", WarningCategory.LintBynameImplicit)
+                    case _ =>
+                  }
+                case _ =>
+              }
+            if (isMultiline && settings.warnByNameImplicit) checkImplicitlyAdaptedBlockResult(expr)
+
+            tree
           case _ => tree
         }
 
@@ -1772,13 +1868,11 @@ abstract class RefChecks extends Transform {
             result.transform(this)
         }
         result1 match {
-          case ClassDef(_, _, _, _)
-             | TypeDef(_, _, _, _)
-             | ModuleDef(_, _, _) =>
+          case ClassDef(_, _, _, _) | TypeDef(_, _, _, _) | ModuleDef(_, _, _) =>
             if (result1.symbol.isLocalToBlock || result1.symbol.isTopLevel)
               varianceValidator.traverse(result1)
           case tt @ TypeTree() if tt.original != null =>
-            varianceValidator.traverse(tt.original) // See scala/bug#7872
+            varianceValidator.validateVarianceOfPolyTypesIn(tt.tpe)
           case _ =>
         }
 
@@ -1787,7 +1881,7 @@ abstract class RefChecks extends Transform {
         result1
       } catch {
         case ex: TypeError =>
-          if (settings.debug) ex.printStackTrace()
+          if (settings.isDebug) ex.printStackTrace()
           reporter.error(tree.pos, ex.getMessage())
           tree
       } finally {

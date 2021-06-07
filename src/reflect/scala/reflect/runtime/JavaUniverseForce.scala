@@ -14,6 +14,10 @@
 package scala.reflect
 package runtime
 
+import scala.annotation.nowarn
+
+@nowarn("cat=deprecation&origin=scala\\.reflect\\.internal\\.Internals\\.compat")
+@nowarn("cat=deprecation&origin=scala\\.reflect\\.internal\\.Trees\\.emptyValDef")
 trait JavaUniverseForce { self: runtime.JavaUniverse  =>
   def force(): Unit = {
     Literal(Constant(42)).duplicate
@@ -63,7 +67,12 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     this.UseInvokeSpecial
     this.TypeParamVarargsAttachment
     this.KnownDirectSubclassesCalled
+    this.DottyEnumSingleton
     this.ConstructorNeedsFence
+    this.MultiargInfixAttachment
+    this.NullaryOverrideAdapted
+    this.ChangeOwnerAttachment
+    this.InterpolatedString
     this.noPrint
     this.typeDebug
     // inaccessible: this.posAssigner
@@ -196,6 +205,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     this.abstractTypesToBounds
     this.dropIllegalStarTypes
     this.wildcardExtrapolation
+    this.SubstSymMap
     this.IsDependentCollector
     this.ApproximateDependentMap
     this.identityTypeMap
@@ -293,12 +303,15 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.IterableClass
     definitions.ListClass
     definitions.SeqClass
+    definitions.SeqFactoryClass
+    definitions.UnapplySeqWrapperClass
     definitions.JavaStringBuilderClass
     definitions.JavaStringBufferClass
     definitions.JavaCharSequenceClass
     definitions.ListModule
     definitions.NilModule
     definitions.SeqModule
+    definitions.Collection_SeqModule
     definitions.ArrayModule
     definitions.ArrayModule_overloadedApply
     definitions.ArrayClass
@@ -338,6 +351,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.BlackboxContextClass
     definitions.WhiteboxContextClass
     definitions.MacroImplAnnotation
+    definitions.MacroImplLocationAnnotation
     definitions.StringContextClass
     definitions.StringContextModule
     definitions.ValueOfClass
@@ -360,6 +374,12 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.TupleClass
     definitions.FunctionClass
     definitions.AbstractFunctionClass
+    definitions.TryClass
+    definitions.FailureClass
+    definitions.SuccessClass
+    definitions.FutureClass
+    definitions.PromiseClass
+    definitions.NonFatalClass
     definitions.MacroContextType
     definitions.ProductRootClass
     definitions.Any_$eq$eq
@@ -412,8 +432,14 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.SwitchClass
     definitions.TailrecClass
     definitions.VarargsClass
+    definitions.NowarnClass
     definitions.uncheckedStableClass
     definitions.uncheckedVarianceClass
+    definitions.ChildAnnotationClass
+    definitions.RepeatedAnnotationClass
+    definitions.TargetNameAnnotationClass
+    definitions.StaticMethodAnnotationClass
+    definitions.PolyFunctionClass
     definitions.BeanPropertyAttr
     definitions.BooleanBeanPropertyAttr
     definitions.CompileTimeOnlyAttr
@@ -434,6 +460,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.UnspecializedClass
     definitions.UnusedClass
     definitions.VolatileAttr
+    definitions.JavaDeprecatedAttr
     definitions.FunctionalInterfaceClass
     definitions.BeanGetterTargetClass
     definitions.BeanSetterTargetClass
@@ -495,9 +522,12 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     uncurry.DesugaredParameterType
     erasure.GenericArray
     erasure.scalaErasure
+    erasure.scala3Erasure
     erasure.specialScalaErasure
+    erasure.specialScala3Erasure
     erasure.javaErasure
     erasure.verifiedJavaErasure
     erasure.boxingErasure
+    erasure.boxing3Erasure
   }
 }

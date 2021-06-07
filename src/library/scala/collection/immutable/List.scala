@@ -65,7 +65,7 @@ import scala.runtime.Statics.releaseFence
   *        objects that rely on structural sharing), will be serialized and deserialized with multiple lists, one for
   *        each reference to it. I.e. structural sharing is lost after serialization/deserialization.
   *
-  *  @see  [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#lists "Scala's Collection Library overview"]]
+  *  @see  [[https://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#lists "Scala's Collection Library overview"]]
   *  section on `Lists` for more information.
   *
   *  @define coll list
@@ -108,7 +108,19 @@ sealed abstract class List[+A]
   def ::: [B >: A](prefix: List[B]): List[B] =
     if (isEmpty) prefix
     else if (prefix.isEmpty) this
-    else (new ListBuffer[B] ++= prefix).prependToList(this)
+    else {
+      val result = new ::[B](prefix.head, this)
+      var curr = result
+      var that = prefix.tail
+      while (!that.isEmpty) {
+        val temp = new ::[B](that.head, this)
+        curr.next = temp
+        curr = temp
+        that = that.tail
+      }
+      releaseFence()
+      result
+    }
 
   /** Adds the elements of a given list in reverse order in front of this list.
     *  `xs reverse_::: ys` is equivalent to
@@ -131,10 +143,25 @@ sealed abstract class List[+A]
 
   override def prepended[B >: A](elem: B): List[B] = elem :: this
 
-  // When calling prependAll with another list `prefix`, avoid copying `this`
   override def prependedAll[B >: A](prefix: collection.IterableOnce[B]): List[B] = prefix match {
     case xs: List[B] => xs ::: this
-    case _ => super.prependedAll(prefix)
+    case _ if prefix.knownSize == 0 => this
+    case b: ListBuffer[B] if this.isEmpty => b.toList
+    case _ =>
+      val iter = prefix.iterator
+      if (iter.hasNext) {
+        val result = new ::[B](iter.next(), this)
+        var curr = result
+        while (iter.hasNext) {
+          val temp = new ::[B](iter.next(), this)
+          curr.next = temp
+          curr = temp
+        }
+        releaseFence()
+        result
+      } else {
+        this
+      }
   }
 
   // When calling appendAll with another list `suffix`, avoid copying `suffix`
@@ -241,7 +268,7 @@ sealed abstract class List[+A]
         if (x.asInstanceOf[AnyRef] ne List.partialNotApplied) h = new ::(x.asInstanceOf[B], Nil)
         rest = rest.tail
         if (rest eq Nil) return if (h eq null) Nil else h
-      } 
+      }
       var t = h
       // Remaining elements
       while (rest ne Nil) {
@@ -252,7 +279,7 @@ sealed abstract class List[+A]
           t = nx
         }
         rest = rest.tail
-      } 
+      }
       releaseFence()
       h
     }
@@ -472,11 +499,11 @@ sealed abstract class List[+A]
     result
   }
 
-  override def filter(p: A => Boolean): List[A] = filterImpl(p, isFlipped = false)
+  override def filter(p: A => Boolean): List[A] = filterCommon(p, isFlipped = false)
 
-  override def filterNot(p: A => Boolean): List[A] = filterImpl(p, isFlipped = true)
+  override def filterNot(p: A => Boolean): List[A] = filterCommon(p, isFlipped = true)
 
-  private[this] def filterImpl(p: A => Boolean, isFlipped: Boolean): List[A] = {
+  private[this] def filterCommon(p: A => Boolean, isFlipped: Boolean): List[A] = {
 
     // everything seen so far so far is not included
     @tailrec def noneIn(l: List[A]): List[A] = {
@@ -556,6 +583,15 @@ sealed abstract class List[+A]
     result
   }
 
+  override def partition(p: A => Boolean): (List[A], List[A]) = {
+    if (isEmpty) List.TupleOfNil
+    else super.partition(p) match {
+      case (Nil, xs) => (Nil, this)
+      case (xs, Nil) => (this, Nil)
+      case pair => pair
+    }
+  }
+
   final override def toList: List[A] = this
 
   // Override for performance
@@ -577,6 +613,39 @@ sealed abstract class List[+A]
       case _ => super.equals(o)
     }
   }
+
+  // TODO: uncomment once bincompat allows (reference: scala/scala#9365)
+  /*
+  // Override for performance: traverse only as much as needed
+  // and share tail when nothing needs to be filtered out anymore
+  override def diff[B >: A](that: collection.Seq[B]): AnyRef = {
+    if (that.isEmpty || this.isEmpty) this
+    else if (tail.isEmpty) if (that.contains(head)) Nil else this
+    else {
+      val occ = occCounts(that)
+      val b = new ListBuffer[A]()
+      @tailrec
+      def rec(remainder: List[A]): List[A] = {
+        if(occ.isEmpty) b.prependToList(remainder)
+        else remainder match {
+          case Nil => b.result()
+          case head :: next => {
+            occ.updateWith(head){
+              case None => {
+                b.append(head)
+                None
+              }
+              case Some(1) => None
+              case Some(n) => Some(n - 1)
+            }
+            rec(next)
+          }
+        }
+      }
+      rec(this)
+    }
+  }
+  */
 
 }
 
@@ -610,13 +679,9 @@ case object Nil extends List[Nothing] {
   */
 @SerialVersionUID(3L)
 object List extends StrictOptimizedSeqFactory[List] {
+  private val TupleOfNil = (Nil, Nil)
 
-  def from[B](coll: collection.IterableOnce[B]): List[B] = coll match {
-    case coll: List[B] => coll
-    case _ if coll.knownSize == 0 => empty[B]
-    case b: ListBuffer[B] => b.toList
-    case _ => ListBuffer.from(coll).toList
-  }
+  def from[B](coll: collection.IterableOnce[B]): List[B] = Nil.prependedAll(coll)
 
   def newBuilder[A]: Builder[A, List[A]] = new ListBuffer()
 

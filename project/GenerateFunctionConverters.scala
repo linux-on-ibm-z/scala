@@ -170,7 +170,7 @@ object GenerateFunctionConverters {
 
   private def buildWrappersViaReflection: Seq[SamConversionCode] = {
 
-    val pack: Symbol = rootMirror.getPackageIfDefined(TermName("java.util.function"))
+    val pack: Symbol = rootMirror.getPackageIfDefined("java.util.function")
 
     case class Jfn(iface: Symbol, sam: Symbol) {
       lazy val genericCount = iface.typeParams.length
@@ -348,7 +348,7 @@ object GenerateFunctionConverters {
 
   def sameText(f: java.io.File, text: String): Boolean = {
     val x = scala.io.Source.fromFile(f)
-    val lines = try { x.getLines.toVector } finally { x.close }
+    val lines = try { x.getLines().toVector } finally { x.close }
     // work around scala/bug#11125
     lines.iterator.filter(_.nonBlank) == Predef.augmentString(text).lines.filter(_.nonBlank)
   }

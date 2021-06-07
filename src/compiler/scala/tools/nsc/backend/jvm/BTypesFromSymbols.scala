@@ -15,6 +15,7 @@ package backend.jvm
 
 import scala.reflect.internal.Flags.{DEFERRED, SYNTHESIZE_IMPL_IN_SUBCLASS}
 import scala.tools.asm
+import scala.tools.nsc.Reporting.WarningCategory
 import scala.tools.nsc.backend.jvm.BTypes._
 import scala.tools.nsc.backend.jvm.BackendReporting._
 
@@ -90,9 +91,9 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
 
     assert(classSym != NoSymbol, "Cannot create ClassBType from NoSymbol")
     assert(classSym.isClass, s"Cannot create ClassBType from non-class symbol $classSym")
-    if (global.settings.debug) {
-      // OPT these assertions have too much performance overhead to run unconditionally
-      assertClassNotArrayNotPrimitive(classSym)
+    // note: classSym can be scala.Array, see https://github.com/scala/bug/issues/12225#issuecomment-729687859
+    if (global.settings.isDebug) {
+      // OPT this assertion has too much performance overhead to run unconditionally
       assert(!primitiveTypeToBType.contains(classSym) || isCompilingPrimitive, s"Cannot create ClassBType for primitive class symbol $classSym")
     }
 
@@ -145,10 +146,15 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   }
 
   def staticHandleFromSymbol(sym: Symbol): asm.Handle = {
-    val owner = if (sym.owner.isModuleClass) sym.owner.linkedClassOfClass else sym.owner
     val descriptor = methodBTypeFromMethodType(sym.info, isConstructor = false).descriptor
-    val ownerBType = classBTypeFromSymbol(owner)
-    new asm.Handle(asm.Opcodes.H_INVOKESTATIC, ownerBType.internalName, sym.name.encoded, descriptor, /* itf = */ ownerBType.isInterface.get)
+    val ownerBType = classBTypeFromSymbol(sym.owner)
+    val rawInternalName = ownerBType.internalName
+    // object Qux { def foo = 1 } --> we want the handle to be to (static) Qux.foo, not (member) Qux$.foo
+    val mustUseMirrorClass = !sym.isJava && sym.owner.isModuleClass && !sym.isStaticMember
+    // ... but we don't know that the mirror class exists! (if there's no companion, the class is synthesized in jvm without a symbol)
+    val ownerInternalName = if (mustUseMirrorClass) rawInternalName stripSuffix nme.MODULE_SUFFIX_STRING else rawInternalName
+    val isInterface = sym.owner.linkedClassOfClass.isTraitOrInterface
+    new asm.Handle(asm.Opcodes.H_INVOKESTATIC, ownerInternalName, sym.name.encoded, descriptor, isInterface)
   }
 
   /**
@@ -157,7 +163,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   final def typeToBType(t: Type): BType = {
     import definitions.ArrayClass
 
-    /**
+    /*
      * Primitive types are represented as TypeRefs to the class symbol of, for example, scala.Int.
      * The `primitiveTypeMap` maps those class symbols to the corresponding PrimitiveBType.
      */
@@ -169,7 +175,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       }
     }
 
-    /**
+    /*
      * When compiling Array.scala, the type parameter T is not erased and shows up in method
      * signatures, e.g. `def apply(i: Int): T`. A TypeRef for T is replaced by ObjectRef.
      */
@@ -190,9 +196,12 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
        */
 
       case tp =>
-        warning(tp.typeSymbol.pos,
+        runReporting.warning(
+          tp.typeSymbol.pos,
           s"an unexpected type representation reached the compiler backend while compiling $currentUnit: $tp. " +
-            "If possible, please file a bug on https://github.com/scala/bug/issues.")
+            "If possible, please file a bug on https://github.com/scala/bug/issues.",
+          WarningCategory.Other,
+          site = "")
 
         tp match {
           case ThisType(ArrayClass)    => ObjectRef // was introduced in 9b17332f11 to fix scala/bug#999, but this code is not reached in its test, or any other test
@@ -202,6 +211,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
           case RefinedType(parents, _) => parents.map(typeToBType(_).asClassBType).reduceLeft((a, b) => a.jvmWiseLUB(b).get)
           case AnnotatedType(_, t)     => typeToBType(t)
           case ExistentialType(_, t)   => typeToBType(t)
+          case x                       => throw new MatchError(x)
         }
     }
   }
@@ -209,11 +219,6 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   def assertClassNotArray(sym: Symbol): Unit = {
     assert(sym.isClass, sym)
     assert(sym != definitions.ArrayClass || isCompilingArray, sym)
-  }
-
-  def assertClassNotArrayNotPrimitive(sym: Symbol): Unit = {
-    assertClassNotArray(sym)
-    assert(!primitiveTypeToBType.contains(sym) || isCompilingPrimitive, sym)
   }
 
   def implementedInterfaces(classSym: Symbol): List[Symbol] = {
@@ -257,7 +262,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   }))
 
   private def computeClassInfo(classSym: Symbol, classBType: ClassBType): Right[Nothing, ClassInfo] = {
-    /**
+    /*
      * Reconstruct the classfile flags from a Java defined class symbol.
      *
      * The implementation of this method is slightly different from `javaFlags` in BTypesFromSymbols.
@@ -397,7 +402,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       nestedClasses ++ companionModuleMembers
     }
 
-    /**
+    /*
      * For nested java classes, the scala compiler creates both a class and a module (and therefore
      * a module class) symbol. For example, in `class A { class B {} }`, the nestedClassSymbols
      * for A contain both the class B and the module class B.
@@ -494,7 +499,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
       else Some(s"${innerClassSym.rawname}${innerClassSym.moduleSuffix}") // moduleSuffix for module classes
     }
 
-    Some(NestedInfo(enclosingClass, outerName, innerName, isStaticNestedClass))
+    Some(NestedInfo(enclosingClass, outerName, innerName, isStaticNestedClass, enteringTyper(innerClassSym.isPrivate)))
   }
 
   /**
@@ -596,6 +601,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
             val selfParam = methodSym.newSyntheticValueParam(methodSym.owner.typeConstructor, nme.SELF)
             val staticMethodType = methodSym.info match {
               case mt@MethodType(params, res) => copyMethodType(mt, selfParam :: params, res)
+              case x                          => throw new MatchError(x)
             }
             val staticMethodSignature = (staticName, methodBTypeFromMethodType(staticMethodType, isConstructor = false).descriptor)
             val staticMethodInfo = MethodInlineInfo(
@@ -690,7 +696,7 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
     // TODO: give nested objects the ACC_FINAL flag again, since we won't let them be overridden
     //
     // For fields, only eager val fields can receive ACC_FINAL. vars or lazy vals can't:
-    // Source: http://docs.oracle.com/javase/specs/jls/se7/html/jls-17.html#jls-17.5.3
+    // Source: https://docs.oracle.com/javase/specs/jls/se7/html/jls-17.html#jls-17.5.3
     // "Another problem is that the specification allows aggressive
     // optimization of final fields. Within a thread, it is permissible to
     // reorder reads of a final field with those modifications of a final

@@ -14,9 +14,10 @@ package scala.tools.nsc.fsc
 
 import scala.tools.nsc.Settings
 import scala.tools.nsc.util.ClassPath
-import scala.reflect.io.{ Path, AbstractFile }
+import scala.reflect.io.{AbstractFile, Path}
+import scala.tools.nsc.settings.{DefaultPathFactory, PathFactory}
 
-class FscSettings(error: String => Unit) extends Settings(error) {
+class FscSettings(error: String => Unit, pathFactory: PathFactory = DefaultPathFactory) extends Settings(error, pathFactory) {
   outer =>
 
   locally {
@@ -43,7 +44,7 @@ class FscSettings(error: String => Unit) extends Settings(error) {
   /** If a setting (other than a PathSetting) represents a path or paths.
    *  For use in absolutization.
    */
-  private def holdsPath = Set[Settings#Setting](d, dependencyfile, pluginsDir)
+  private def holdsPath = Set[Settings#Setting](outdir, dependencyfile, pluginsDir)
 
   override def processArguments(arguments: List[String], processAll: Boolean): (Boolean, List[String]) = {
     val (r, args) = super.processArguments(arguments, processAll)
@@ -60,7 +61,7 @@ class FscSettings(error: String => Unit) extends Settings(error) {
   /** All user set settings rewritten with absolute paths based on currentDir */
   def absolutize(): Unit = {
     userSetSettings foreach {
-      case p: OutputSetting => p.outputDirs setSingleOutput AbstractFile.getDirectory(absolutizePath(p.value))
+      case p: OutputSetting => outputDirs.setSingleOutput(AbstractFile.getDirectory(absolutizePath(p.value)))
       case p: PathSetting   => p.value = ClassPath.map(p.value, absolutizePath)
       case p: StringSetting => if (holdsPath(p)) p.value = absolutizePath(p.value)
       case _                => ()

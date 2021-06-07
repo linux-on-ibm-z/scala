@@ -20,7 +20,7 @@ import scala.tools.asm
 
 /*
  *
- *  @author  Miguel Garcia, http://lamp.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
+ *  @author  Miguel Garcia, https://lampwww.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
  *
  */
 abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
@@ -193,6 +193,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
             case Typed(Ident(nme.WILDCARD), tpt)  => NamelessEH(tpeTK(tpt).asClassBType, caseBody)
             case Ident(nme.WILDCARD)              => NamelessEH(jlThrowableRef,  caseBody)
             case Bind(_, _)                       => BoundEH   (pat.symbol, caseBody)
+            case _                                => throw new Exception(s"Unexpected try case pattern tree $pat of class ${pat.shortClass}")
           }
         }
 
@@ -243,7 +244,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
       val endTryBody = currProgramPoint()
       bc goTo postHandlers
 
-      /**
+      /*
        * A return within a `try` or `catch` block where a `finally` is present ("early return")
        * emits a store of the result to a local, jump to a "cleanup" version of the `finally` block,
        * and sets `shouldEmitCleanup = true` (see [[PlainBodyBuilder.genReturn]]).
@@ -420,7 +421,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
     /* Does this tree have a try-catch block? */
     def mayCleanStack(tree: Tree): Boolean = tree exists { t => t.isInstanceOf[Try] }
 
-    trait EHClause
+    sealed trait EHClause
     case class NamelessEH(typeToDrop: ClassBType,  caseBody: Tree) extends EHClause
     case class BoundEH    (patSymbol: Symbol, caseBody: Tree) extends EHClause
 

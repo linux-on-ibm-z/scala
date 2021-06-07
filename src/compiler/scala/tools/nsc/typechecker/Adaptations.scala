@@ -13,12 +13,12 @@
 package scala.tools.nsc
 package typechecker
 
-/** This trait provides logic for assessing the validity of argument
+import scala.tools.nsc.Reporting.WarningCategory
+
+/** A provider of the logic for assessing the validity of argument
  *  adaptations, such as tupling, unit-insertion, widening, etc.  Such
  *  logic is spread around the compiler, without much ability on the
  *  part of the user to tighten the potentially dangerous bits.
- *
- *  TODO: unifying/consolidating said logic under consistent management.
  *
  *  @author  Paul Phillips
  */
@@ -35,6 +35,10 @@ trait Adaptations {
       def applyArg = t match {
         case Apply(_, arg :: Nil) => arg
         case _                    => EmptyTree
+      }
+      def isInfix = t match {
+        case Apply(_, arg :: Nil) => t.hasAttachment[MultiargInfixAttachment.type]
+        case _                    => false
       }
       def callString = (
         ( if (t.symbol.isConstructor) "new " else "" ) +
@@ -86,15 +90,17 @@ trait Adaptations {
         true // keep adaptation
       }
       @inline def warnAdaptation = {
-        if (settings.warnAdaptedArgs) context.warning(t.pos, adaptWarningMessage(
-          s"adapted the argument list to the expected ${args.size}-tuple: add additional parens instead"
-        ))
+        if (settings.warnAdaptedArgs && !isInfix) context.warning(t.pos, adaptWarningMessage(
+          s"adapted the argument list to the expected ${args.size}-tuple: add additional parens instead"),
+          WarningCategory.LintAdaptedArgs)
         true // keep adaptation
       }
-      if (args.isEmpty) {
-        if (currentRun.isScala300) noAdaptation else deprecatedAdaptation
-      } else
+      if (args.nonEmpty)
         warnAdaptation
+      else if (currentRun.isScala3)
+        noAdaptation
+      else
+        deprecatedAdaptation
     }
   }
 }

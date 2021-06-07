@@ -79,7 +79,7 @@ object ArrayOps {
       *
       *  @param f      the function to apply to each element.
       *  @tparam B     the element type of the returned array.
-      *  @return       a new aray resulting from applying the given function
+      *  @return       a new array resulting from applying the given function
       *                `f` to each element of this array and collecting the results.
       */
     def map[B: ClassTag](f: A => B): Array[B] = {
@@ -317,7 +317,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     val lo = max(from, 0)
     val hi = min(until, xs.length)
     if (hi > lo) {
-      ((xs: Array[_]) match {
+      (((xs: Array[_]): @unchecked) match {
         case x: Array[AnyRef]     => copyOfRange(x, lo, hi)
         case x: Array[Int]        => copyOfRange(x, lo, hi)
         case x: Array[Double]     => copyOfRange(x, lo, hi)
@@ -396,7 +396,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
   }
 
   def iterator: Iterator[A] =
-    ((xs: Any) match {
+    ((xs: Any @unchecked) match {
       case xs: Array[AnyRef]  => new ArrayOps.ArrayIterator(xs)
       case xs: Array[Int]     => new ArrayOps.ArrayIterator(xs)
       case xs: Array[Double]  => new ArrayOps.ArrayIterator(xs)
@@ -412,7 +412,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
 
   def stepper[S <: Stepper[_]](implicit shape: StepperShape[A, S]): S with EfficientSplit = {
     import convert.impl._
-    val s = shape.shape match {
+    val s = (shape.shape: @unchecked) match {
       case StepperShape.ReferenceShape => (xs: Any) match {
         case bs: Array[Boolean] => new BoxedBooleanArrayStepper(bs, 0, xs.length)
         case _ => new ObjectArrayStepper[AnyRef](xs.asInstanceOf[Array[AnyRef ]], 0, xs.length)
@@ -527,7 +527,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  @return  an iterator yielding the elements of this array in reversed order
     */
   def reverseIterator: Iterator[A] =
-    ((xs: Any) match {
+    ((xs: Any @unchecked) match {
       case xs: Array[AnyRef]  => new ArrayOps.ReverseIterator(xs)
       case xs: Array[Int]     => new ArrayOps.ReverseIterator(xs)
       case xs: Array[Double]  => new ArrayOps.ReverseIterator(xs)
@@ -559,8 +559,8 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
 
   /** Selects all elements of this array which do not satisfy a predicate.
     *
-    *  @param pred  the predicate used to test elements.
-    *  @return      a new array consisting of all elements of this array that do not satisfy the given predicate `pred`.
+    *  @param p     the predicate used to test elements.
+    *  @return      a new array consisting of all elements of this array that do not satisfy the given predicate `p`.
     */
   def filterNot(p: A => Boolean): Array[A] = filter(x => !p(x))
 
@@ -678,10 +678,10 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  @return  the index `>= from` of the first element of this array that satisfies the predicate `p`,
     *           or `-1`, if none exists.
     */
-  def indexWhere(f: A => Boolean, from: Int = 0): Int = {
+  def indexWhere(@deprecatedName("f", "2.13.3") p: A => Boolean, from: Int = 0): Int = {
     var i = from
     while(i < xs.length) {
-      if(f(xs(i))) return i
+      if(p(xs(i))) return i
       i += 1
     }
     -1
@@ -724,8 +724,8 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  @return        an option value containing the first element in the array
     *                 that satisfies `p`, or `None` if none exists.
     */
-  def find(f: A => Boolean): Option[A] = {
-    val idx = indexWhere(f)
+  def find(@deprecatedName("f", "2.13.3") p: A => Boolean): Option[A] = {
+    val idx = indexWhere(p)
     if(idx == -1) None else Some(xs(idx))
   }
 
@@ -734,7 +734,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  @param   p     the predicate used to test elements.
     *  @return        `true` if the given predicate `p` is satisfied by at least one element of this array, otherwise `false`
     */
-  def exists(f: A => Boolean): Boolean = indexWhere(f) >= 0
+  def exists(@deprecatedName("f", "2.13.3") p: A => Boolean): Boolean = indexWhere(p) >= 0
 
   /** Tests whether a predicate holds for all elements of this array.
     *
@@ -742,10 +742,10 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  @return        `true` if this array is empty or the given predicate `p`
     *                 holds for all elements of this array, otherwise `false`.
     */
-  def forall(f: A => Boolean): Boolean = {
+  def forall(@deprecatedName("f", "2.13.3") p: A => Boolean): Boolean = {
     var i = 0
     while(i < xs.length) {
-      if(!f(xs(i))) return false
+      if(!p(xs(i))) return false
       i += 1
     }
     true
@@ -776,7 +776,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
       }
       v
     }
-    ((xs: Any) match {
+    ((xs: Any @unchecked) match {
       case null => throw new NullPointerException // null-check first helps static analysis of instanceOf
       case xs: Array[AnyRef]  => f(xs, op.asInstanceOf[(Any, Any) => Any], z)
       case xs: Array[Int]     => f(xs, op.asInstanceOf[(Any, Any) => Any], z)
@@ -881,7 +881,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
       }
       v
     }
-    ((xs: Any) match {
+    ((xs: Any @unchecked) match {
       case null => throw new NullPointerException
       case xs: Array[AnyRef]  => f(xs, op.asInstanceOf[(Any, Any) => Any], z)
       case xs: Array[Int]     => f(xs, op.asInstanceOf[(Any, Any) => Any], z)
@@ -912,7 +912,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *
     *  @param f      the function to apply to each element.
     *  @tparam B     the element type of the returned array.
-    *  @return       a new aray resulting from applying the given function
+    *  @return       a new array resulting from applying the given function
     *                `f` to each element of this array and collecting the results.
     */
   def map[B](f: A => B)(implicit ct: ClassTag[B]): Array[B] = {
@@ -920,7 +920,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     val ys = new Array[B](len)
     if(len > 0) {
       var i = 0
-      (xs: Any) match {
+      (xs: Any @unchecked) match {
         case xs: Array[AnyRef]  => while (i < len) { ys(i) = f(xs(i).asInstanceOf[A]); i = i+1 }
         case xs: Array[Int]     => while (i < len) { ys(i) = f(xs(i).asInstanceOf[A]); i = i+1 }
         case xs: Array[Double]  => while (i < len) { ys(i) = f(xs(i).asInstanceOf[A]); i = i+1 }
@@ -1319,7 +1319,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
   def foreach[U](f: A => U): Unit = {
     val len = xs.length
     var i = 0
-    (xs: Any) match {
+    (xs: Any @unchecked) match {
       case xs: Array[AnyRef]  => while (i < len) { f(xs(i).asInstanceOf[A]); i = i+1 }
       case xs: Array[Int]     => while (i < len) { f(xs(i).asInstanceOf[A]); i = i+1 }
       case xs: Array[Double]  => while (i < len) { f(xs(i).asInstanceOf[A]); i = i+1 }
@@ -1569,18 +1569,18 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *                ''n'' times in `that`, then the first ''n'' occurrences of `x` will not form
     *                part of the result, but any following occurrences will.
     */
-  def diff[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).diff(that).array.asInstanceOf[Array[A]]
+  def diff[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).diff(that).toArray[A]
 
   /** Computes the multiset intersection between this array and another sequence.
-    *
-    *  @param that   the sequence of elements to intersect with.
-    *  @return       a new array which contains all elements of this array
-    *                which also appear in `that`.
-    *                If an element value `x` appears
-    *                ''n'' times in `that`, then the first ''n'' occurrences of `x` will be retained
-    *                in the result, but any following occurrences will be omitted.
-    */
-  def intersect[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).intersect(that).array.asInstanceOf[Array[A]]
+   *
+   *   @param that   the sequence of elements to intersect with.
+   *   @return       a new array which contains all elements of this array
+   *                 which also appear in `that`.
+   *                 If an element value `x` appears
+   *                 ''n'' times in `that`, then the first ''n'' occurrences of `x` will be retained
+   *                 in the result, but any following occurrences will be omitted.
+   */
+  def intersect[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).intersect(that).toArray[A]
 
   /** Groups elements in fixed size blocks by passing a "sliding window"
     *  over them (as opposed to partitioning them, as is done in grouped.)
@@ -1592,7 +1592,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *          last element (which may be the only element) will be truncated
     *          if there are fewer than `size` elements remaining to be grouped.
     */
-  def sliding(size: Int, step: Int = 1): Iterator[Array[A]] = mutable.ArraySeq.make(xs).sliding(size, step).map(_.array.asInstanceOf[Array[A]])
+  def sliding(size: Int, step: Int = 1): Iterator[Array[A]] = mutable.ArraySeq.make(xs).sliding(size, step).map(_.toArray[A])
 
   /** Iterates over combinations.  A _combination_ of length `n` is a subsequence of
     *  the original array, with the elements taken in order.  Thus, `Array("x", "y")` and `Array("y", "y")`
@@ -1609,7 +1609,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  Array("a", "b", "b", "b", "c").combinations(2) == Iterator(Array(a, b), Array(a, c), Array(b, b), Array(b, c))
     *  }}}
     */
-  def combinations(n: Int): Iterator[Array[A]] = mutable.ArraySeq.make(xs).combinations(n).map(_.array.asInstanceOf[Array[A]])
+  def combinations(n: Int): Iterator[Array[A]] = mutable.ArraySeq.make(xs).combinations(n).map(_.toArray[A])
 
   /** Iterates over distinct permutations.
     *
@@ -1618,7 +1618,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  Array("a", "b", "b").permutations == Iterator(Array(a, b, b), Array(b, a, b), Array(b, b, a))
     *  }}}
     */
-  def permutations: Iterator[Array[A]] = mutable.ArraySeq.make(xs).permutations.map(_.array.asInstanceOf[Array[A]])
+  def permutations: Iterator[Array[A]] = mutable.ArraySeq.make(xs).permutations.map(_.toArray[A])
 
   // we have another overload here, so we need to duplicate this method
   /** Tests whether this array contains the given sequence at a given index.

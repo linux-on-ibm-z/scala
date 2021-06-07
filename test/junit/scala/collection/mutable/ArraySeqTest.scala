@@ -6,14 +6,13 @@ import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
 import scala.collection.immutable.Seq
-import scala.reflect.ClassTag
 
 @RunWith(classOf[JUnit4])
 class ArraySeqTest {
   @Test
   def t11187(): Unit = {
     assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sorted)
-    assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sortInPlace)
+    assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sortInPlace())
     assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sortBy(identity))
     assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sortInPlaceBy(identity))
     assertEquals(ArraySeq(1, 2), ArraySeq(2, 1).sortWith(_ < _))
@@ -38,14 +37,14 @@ class ArraySeqTest {
   }
 
   @Test
-  def testSortInPlaceAnyRef: Unit = {
+  def testSortInPlaceAnyRef(): Unit = {
     val arr = ArraySeq[Integer](3, 2, 1)
     arr.sortInPlace()
     assertEquals(ArraySeq[Integer](1, 2, 3), arr)
   }
 
   @Test
-  def testSortInPlaceInt: Unit = {
+  def testSortInPlaceInt(): Unit = {
     val arr = ArraySeq.make(Array[Int](3, 2, 1))
     arr.sortInPlace()
     assertEquals(ArraySeq.make(Array[Int](1, 2, 3)), arr)

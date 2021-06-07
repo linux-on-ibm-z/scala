@@ -2,9 +2,9 @@ Scala is licensed under the [Apache License Version 2.0](https://www.apache.org/
 
 ## Scala License
 
-Copyright (c) 2002-2019 EPFL
+Copyright (c) 2002-2021 EPFL
 
-Copyright (c) 2011-2019 Lightbend, Inc.
+Copyright (c) 2011-2021 Lightbend, Inc.
 
 All rights reserved.
 
@@ -28,20 +28,15 @@ which are also included in the `licenses/` directory:
 ### [Apache License](http://www.apache.org/licenses/LICENSE-2.0.html)
 This license is used by the following third-party libraries:
 
-  * jansi
-
-### [BSD License](http://www.opensource.org/licenses/bsd-license.php)
-This license is used by the following third-party libraries:
-
-  * jline
-  * scalacheck
+  * JNA
 
 ### [BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause)
 This license is used by the following third-party libraries:
 
-  * asm
+  * ASM
+  * JLine 3
 
 ### [MIT License](http://www.opensource.org/licenses/MIT)
 This license is used by the following third-party libraries:
 
-  * jquery
+  * jQuery

@@ -1,4 +1,4 @@
-// scalac: -Xlint:eta-zero -Xlint:eta-sam
+// scalac: -deprecation -Xlint:eta-zero -Xlint:eta-sam
 //
 
 trait AcciSamOne { def apply(x: Int): Int }
@@ -18,8 +18,8 @@ class EtaExpandZeroArg {
   def bar = ""
   val t2a: () => Any = bar   // error: no eta-expansion of zero-arglist-methods (nullary methods)
   val t2b: () => Any = bar() // error: bar doesn't take arguments, so expanded to bar.apply(), which misses an argument
-  val t2c: () => Any = bar _ // ok
-  val t2d: Any       = bar _ // ok
+  val t2c: () => Any = bar _ // warning: eta-expanding a nullary method
+  val t2d: Any       = bar _ // warning: eta-expanding a nullary method
   val t2e: Any       = bar() _ // error: not enough arguments for method apply
 
   def baz() = ""
@@ -35,7 +35,7 @@ class EtaExpandZeroArg {
   val t4d: () => Any = zap() _ // ok
 
   def zup(x: Int) = x
-  val t5a = zup // error in 2.13, eta-expansion in 2.14
+  val t5a = zup // error in 2.13, eta-expansion in 3.0
   val t5Fun: Int => Int = zup // ok
   val t5AcciSam: AcciSamOne = zup // ok, but warning
   val t5Sam: SamOne = zup // ok

@@ -43,7 +43,7 @@ abstract class ClassfileWriters {
    *
    * Operations are threadsafe.
    */
-  sealed trait ClassfileWriter extends OutputFileWriter {
+  sealed trait ClassfileWriter extends OutputFileWriter with AutoCloseable {
     /**
      * Write a classfile
      */
@@ -63,7 +63,7 @@ abstract class ClassfileWriters {
 
     def apply(global: Global): ClassfileWriter = {
       //Note dont import global._ - its too easy to leak non threadsafe structures
-      import global.{cleanup, log, settings, statistics}
+      import global.{ cleanup, log, settings }
       def jarManifestMainClass: Option[String] = settings.mainClass.valueSetByUser.orElse {
         cleanup.getEntryPoints match {
           case List(name) => Some(name)
@@ -91,7 +91,7 @@ abstract class ClassfileWriters {
         new DebugClassWriter(basicClassWriter, asmp, dump)
       }
 
-      val enableStats = statistics.enabled && settings.YaddBackendThreads.value == 1
+      val enableStats = settings.areStatisticsEnabled && settings.YaddBackendThreads.value == 1
       if (enableStats) new WithStatsWriter(withAdditionalFormats) else withAdditionalFormats
     }
 
@@ -171,19 +171,18 @@ abstract class ClassfileWriters {
   }
 
   object FileWriter {
-    def apply(global: Global, file: AbstractFile, jarManifestMainClass: Option[String]): FileWriter = {
-      if (file hasExtension "jar") {
+    def apply(global: Global, file: AbstractFile, jarManifestMainClass: Option[String]): FileWriter =
+      if (file.hasExtension("jar")) {
         val jarCompressionLevel = global.settings.YjarCompressionLevel.value
-        val jarFactory = Class.forName(global.settings.YjarFactory.value).asSubclass(classOf[JarFactory]).newInstance()
+        val jarFactory =
+          Class.forName(global.settings.YjarFactory.value)
+            .asSubclass(classOf[JarFactory])
+            .getDeclaredConstructor().newInstance()
         new JarEntryWriter(file, jarManifestMainClass, jarCompressionLevel, jarFactory, global.plugins)
-      } else if (file.isVirtual) {
-        new VirtualFileWriter(file)
-      } else if (file.isDirectory) {
-        new DirEntryWriter(file.file.toPath)
-      } else {
-        throw new IllegalStateException(s"don't know how to handle an output of $file [${file.getClass}]")
       }
-    }
+      else if (file.isVirtual) new VirtualFileWriter(file)
+      else if (file.isDirectory) new DirEntryWriter(file.file.toPath)
+      else throw new IllegalStateException(s"don't know how to handle an output of $file [${file.getClass}]")
   }
 
   private final class JarEntryWriter(file: AbstractFile, mainClass: Option[String], compressionLevel: Int, jarFactory: JarFactory, plugins: List[Plugin]) extends FileWriter {

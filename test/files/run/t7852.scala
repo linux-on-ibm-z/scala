@@ -9,7 +9,7 @@ import scala.jdk.CollectionConverters._
 object Test extends BytecodeTest {
   val nullChecks = Set(asm.Opcodes.IFNONNULL, asm.Opcodes.IFNULL)
 
-  def show: Unit = {
+  def show(): Unit = {
     def test(methodName: String, expected: Int): Unit = {
       val classNode = loadClassNode("Lean")
       val methodNode = getMethod(classNode, methodName)
@@ -19,6 +19,7 @@ object Test extends BytecodeTest {
     test("string", expected = 0)
     test("module", expected = 0)
     test("moduleIndirect", expected = 2)
+    test("moduleViaPredefAlias", expected = 2)
   }
 
   def countNullChecks(insnList: asm.tree.InsnList): Int =
@@ -31,11 +32,15 @@ class Lean {
   }
 
   def module: Unit = {
-    Nil == (toString: Any)
+    scala.collection.immutable.Nil == (toString: Any)
   }
 
   def moduleIndirect: Unit = {
     val n: Nil.type = null
     n == (toString: Any) // still need null checks here.
+  }
+
+  def moduleViaPredefAlias: Unit = {
+    Nil == (toString: Any)
   }
 }

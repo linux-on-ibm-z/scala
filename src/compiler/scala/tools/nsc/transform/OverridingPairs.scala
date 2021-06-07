@@ -13,6 +13,7 @@
 package scala.tools.nsc
 package transform
 
+import scala.annotation.nowarn
 import scala.reflect.internal.SymbolPairs
 
 /** A class that yields a kind of iterator (`Cursor`),
@@ -24,12 +25,19 @@ import scala.reflect.internal.SymbolPairs
 abstract class OverridingPairs extends SymbolPairs {
   import global._
 
+  // TODO: uncomment when deprecating the below
+  // @nowarn("""cat=deprecation&origin=scala\.tools\.nsc\.transform\.OverridingPairs\.Cursor""")
+  final type PairsCursor = Cursor
+
+  // TODO: deprecate when we can cleanly cross-compile without warnings
+  // @deprecated("use PairsCursor instead", since = "2.13.4")
+  @nowarn("msg=shadowing a nested class of a parent is deprecated")
   class Cursor(base: Symbol) extends super.Cursor(base) {
     /** Symbols to exclude: Here these are constructors and private/artifact symbols,
      *  including bridges. But it may be refined in subclasses.
      */
     override protected def exclude(sym: Symbol) = (
-         sym.isPrivateLocal
+        (sym.isPrivateLocal && sym.isParamAccessor)
       || sym.isArtifact
       || sym.isConstructor
       || (sym.isPrivate && sym.owner != base) // Privates aren't inherited. Needed for pos/t7475a.scala
@@ -46,8 +54,20 @@ abstract class OverridingPairs extends SymbolPairs {
       && (lowMemberType matches (self memberType high))
     ) // TODO we don't call exclude(high), should we?
 
-    override def skipOwnerPair(lowClass: Symbol, highClass: Symbol): Boolean =
-      lowClass.isJavaDefined && highClass.isJavaDefined // javac is already checking this better than we could
+    override protected def skipOwnerPair(lowClass: Symbol, highClass: Symbol): Boolean = {
+      // Two Java-defined methods can be skipped in most cases, as javac will check the overrides; skipping is
+      // actually necessary to avoid false errors, as Java doesn't have the Scala's linearization rules. However, when
+      // a Java interface is mixed into a Scala class, mixed-in default methods need to go through override checking
+      // (neg/t12394). Checking is also required if the "mixed-in" Java interface method is abstract (neg/t12380).
+      lowClass.isJavaDefined && highClass.isJavaDefined && {
+        !lowClass.isJavaInterface && !highClass.isJavaInterface || {
+          !base.info.parents.tail.exists(p => {
+            val psym = p.typeSymbol
+            psym.isNonBottomSubClass(lowClass) || psym.isNonBottomSubClass(highClass)
+          })
+        }
+      }
+    }
   }
 
   private def bothJavaOwnedAndEitherIsField(low: Symbol, high: Symbol): Boolean = {
@@ -55,7 +75,7 @@ abstract class OverridingPairs extends SymbolPairs {
       (low.isField || high.isField)
   }
 
-  final class BridgesCursor(base: Symbol) extends Cursor(base) {
+  final class BridgesCursor(base: Symbol) extends PairsCursor(base) {
     // Varargs bridges may need generic bridges due to the non-repeated part of the signature of the involved methods.
     // The vararg bridge is generated during refchecks (probably to simplify override checking),
     // but then the resulting varargs "bridge" method may itself need an actual erasure bridge.

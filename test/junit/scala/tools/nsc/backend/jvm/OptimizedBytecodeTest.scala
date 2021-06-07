@@ -101,6 +101,7 @@ class OptimizedBytecodeTest extends BytecodeTesting {
         |  def fillArray(arr: Array[V], v: V) = (arr: Any) match {
         |    case x: Array[Int]  => null
         |    case x: Array[Long] => v.asInstanceOf[Long]
+        |    case x              => throw new MatchError(x)
         |  }
         |}
       """.stripMargin
@@ -339,7 +340,7 @@ class OptimizedBytecodeTest extends BytecodeTesting {
   def t8315b(): Unit = {
     val code =
       """class C {
-        |  def crash: Unit = {
+        |  def crash(): Unit = {
         |    val key = ""
         |    try map(new F(key))
         |    catch { case _: Throwable => }

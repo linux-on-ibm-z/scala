@@ -28,7 +28,7 @@ import scala.tools.nsc.backend.jvm.analysis.InstructionStackEffect
 
 object BytecodeUtils {
 
-  // http://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.9.1
+  // https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.9.1
   final val maxJVMMethodSize = 65535
 
   // 5% margin, more than enough for the instructions added by the inliner (store / load args, null check for instance methods)
@@ -125,6 +125,8 @@ object BytecodeUtils {
   def isSynchronizedMethod(methodNode: MethodNode): Boolean = (methodNode.access & ACC_SYNCHRONIZED) != 0
 
   def isNativeMethod(methodNode: MethodNode): Boolean = (methodNode.access & ACC_NATIVE) != 0
+
+  def isVarargsMethod(methodNode: MethodNode): Boolean = (methodNode.access & ACC_VARARGS) != 0
 
   def isSyntheticMethod(methodNode: MethodNode): Boolean = (methodNode.access & ACC_SYNTHETIC) != 0
 
@@ -289,7 +291,7 @@ object BytecodeUtils {
         if (l == from) list.set(i, to)
       }
     }
-    reference match {
+    (reference: @unchecked) match {
       case jump: JumpInsnNode           => jump.label = to
       case line: LineNumberNode         => line.start = to
       case switch: LookupSwitchInsnNode => substList(switch.labels); if (switch.dflt == from) switch.dflt = to

@@ -84,7 +84,7 @@ class PatmatBytecodeTest extends BytecodeTesting {
         |  }
         |}
       """.stripMargin
-    val c :: _ = optCompiler.compileClasses(code)
+    val c :: _ = optCompiler.compileClasses(code): @unchecked
 
     assertSameSummary(getMethod(c, "a"), List(
       NEW, DUP, ICONST_1, LDC, "<init>",
@@ -98,10 +98,11 @@ class PatmatBytecodeTest extends BytecodeTesting {
         |class C {
         |  def a = (Foo(1): Any) match {
         |    case Foo(_: String) =>
+        |    case x              => throw new MatchError(x)
         |  }
         |}
       """.stripMargin
-    val c :: _ = optCompiler.compileClasses(code)
+    val c :: _ = optCompiler.compileClasses(code): @unchecked
     assert(!getInstructions(c, "a").exists(i => i.opcode == IFNULL || i.opcode == IFNONNULL), textify(getAsmMethod(c, "a")))
   }
 
@@ -115,7 +116,7 @@ class PatmatBytecodeTest extends BytecodeTesting {
         |  }
         |}
       """.stripMargin
-    val c :: _ = optCompiler.compileClasses(code)
+    val c :: _ = optCompiler.compileClasses(code): @unchecked
     assertSameSummary(getMethod(c, "a"), List(
       NEW, DUP, ICONST_1, "valueOf", LDC, "<init>", ASTORE /*1*/,
       ALOAD /*1*/, "y", ASTORE /*2*/,
@@ -138,7 +139,7 @@ class PatmatBytecodeTest extends BytecodeTesting {
       """.stripMargin
     val c = optCompiler.compileClass(code, allowMessage = _.msg.contains("may not be exhaustive"))
 
-    val expected = List(
+    val expected = List[Any](
       ALOAD /*1*/ , INSTANCEOF /*::*/ , IFEQ /*A*/ ,
       ALOAD, CHECKCAST /*::*/ , "head", "unboxToInt",
       ISTORE, GOTO /*B*/ ,

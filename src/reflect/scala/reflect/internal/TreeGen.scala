@@ -396,7 +396,7 @@ abstract class TreeGen {
 
     val (edefs, rest) = body span treeInfo.isEarlyDef
     val (evdefs, etdefs) = edefs partition treeInfo.isEarlyValDef
-    val gvdefs = evdefs map {
+    val gvdefs = evdefs collect {
       case vdef @ ValDef(_, _, tpt, _) =>
         copyValDef(vdef)(
         // atPos for the new tpt is necessary, since the original tpt might have no position
@@ -694,6 +694,7 @@ abstract class TreeGen {
     /* A reference to the name bound in Bind `pat`. */
     def makeValue(pat: Tree): Tree = pat match {
       case Bind(name, _) => Ident(name) setPos pat.pos.focus
+      case x             => throw new MatchError(x)
     }
 
     /* The position of the closure that starts with generator at position `genpos`. */
@@ -719,8 +720,8 @@ abstract class TreeGen {
         val valeqs = rest.take(definitions.MaxTupleArity - 1).takeWhile { ValEq.unapply(_).nonEmpty }
         assert(!valeqs.isEmpty, "Missing ValEq")
         val rest1 = rest.drop(valeqs.length)
-        val pats = valeqs map { case ValEq(pat, _) => pat }
-        val rhss = valeqs map { case ValEq(_, rhs) => rhs }
+        val pats = valeqs.collect { case ValEq(pat, _) => pat }
+        val rhss = valeqs.collect { case ValEq(_, rhs) => rhs }
         val defpat1 = makeBind(pat)
         val defpats = pats map makeBind
         val pdefs = defpats.lazyZip(rhss).flatMap(mkPatDef)
@@ -753,9 +754,10 @@ abstract class TreeGen {
     propagateNoWarnAttachment(from, to).updateAttachment(PatVarDefAttachment)
 
   /** Create tree for pattern definition <mods val pat0 = rhs> */
-  def mkPatDef(mods: Modifiers, pat: Tree, rhs: Tree)(implicit fresh: FreshNameCreator): List[ValDef] = matchVarPattern(pat) match {
+  def mkPatDef(mods: Modifiers, pat: Tree, rhs: Tree)(implicit fresh: FreshNameCreator): List[ValDef] = mkPatDef(mods, pat, rhs, rhs.pos)(fresh)
+  def mkPatDef(mods: Modifiers, pat: Tree, rhs: Tree, rhsPos: Position)(implicit fresh: FreshNameCreator): List[ValDef] = matchVarPattern(pat) match {
     case Some((name, tpt)) =>
-      List(atPos(pat.pos union rhs.pos) {
+      List(atPos(pat.pos union rhsPos) {
         propagateNoWarnAttachment(pat, ValDef(mods, name.toTermName, tpt, rhs))
       })
 
@@ -783,13 +785,13 @@ abstract class TreeGen {
         case Typed(expr, tpt) if !expr.isInstanceOf[Ident] =>
           val rhsTypedUnchecked =
             if (tpt.isEmpty) rhsUnchecked
-            else Typed(rhsUnchecked, tpt) setPos (rhs.pos union tpt.pos)
+            else Typed(rhsUnchecked, tpt) setPos (rhsPos union tpt.pos)
           (expr, rhsTypedUnchecked)
         case ok =>
           (ok, rhsUnchecked)
       }
       val vars = getVariables(pat1)
-      val matchExpr = atPos((pat1.pos union rhs.pos).makeTransparent) {
+      val matchExpr = atPos((pat1.pos union rhsPos).makeTransparent) {
         Match(
           rhs1,
           List(
@@ -800,15 +802,20 @@ abstract class TreeGen {
       }
       vars match {
         case List((vname, tpt, pos, original)) =>
-          List(atPos(pat.pos union pos union rhs.pos) {
+          List(atPos(pat.pos union pos union rhsPos) {
             propagatePatVarDefAttachments(original, ValDef(mods, vname.toTermName, tpt, matchExpr))
           })
         case _ =>
           val tmp = freshTermName()
           val firstDef =
             atPos(matchExpr.pos) {
-              ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)),
-                     tmp, TypeTree(), matchExpr)
+              val v = ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)), tmp, TypeTree(), matchExpr)
+              if (vars.isEmpty) {
+                v.updateAttachment(PatVarDefAttachment)  // warn later if this introduces a Unit-valued field
+                if (mods.isImplicit)
+                  currentRun.reporting.deprecationWarning(matchExpr.pos, "Implicit pattern definition binds no variables", since="2.13", "", "")
+              }
+              v
             }
           var cnt = 0
           val restDefs = for ((vname, tpt, pos, original) <- vars) yield atPos(pos) {

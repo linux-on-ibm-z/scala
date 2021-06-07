@@ -99,7 +99,8 @@ class AbstractRunner(val config: RunnerSpec.Config, protected final val testSour
       diffed ::: logged
     }
     if (terse) {
-      if (state.isOk) { printDot() ; Nil }
+      if (state.isSkipped) { printS(); Nil }
+      else if (state.isOk) { printDot() ; Nil }
       else { printEx() ; statusLine(state, durationMs) :: errInfo }
     } else {
       echo(statusLine(state, durationMs))
@@ -175,7 +176,7 @@ class AbstractRunner(val config: RunnerSpec.Config, protected final val testSour
 
   /** Run the tests and return the success status */
   def run(): Boolean = {
-    setUncaughtHandler
+    setUncaughtHandler()
 
     if (config.optVersion) echo(versionMsg)
     else if (config.optHelp) {
@@ -183,7 +184,8 @@ class AbstractRunner(val config: RunnerSpec.Config, protected final val testSour
       echo(RunnerSpec.helpMsg)
     }
     else {
-      val (individualTests, invalid) = config.parsed.residualArgs map (p => Path(p)) partition denotesTestPath
+      val norm = Function.chain(Seq(testIdentToTestPath, checkFileToTestFile, testFileToTestDir, testDirToTestFile))
+      val (individualTests, invalid) = config.parsed.residualArgs map (p => norm(Path(p))) partition denotesTestPath
       if (invalid.nonEmpty) {
         if (verbose)
           invalid foreach (p => echoWarning(s"Discarding invalid test path " + p))

@@ -17,7 +17,6 @@ package tpe
 
 import scala.collection.mutable
 import scala.annotation.tailrec
-import scala.reflect.internal.util.StatisticsStatics
 import Variance._
 
 private[internal] trait GlbLubs {
@@ -191,6 +190,12 @@ private[internal] trait GlbLubs {
         rest filter (t => !first.typeSymbol.isSubClass(t.typeSymbol)))
   }
 
+  // OPT: hoist allocation of the collector and lambda out of the loop in partition
+  private val isWildCardOrNonGroundTypeVarCollector = new FindTypeCollector( {
+    case tv: TypeVar => !tv.isGround
+    case t => t.isWildcard
+  })
+
   /** From a list of types, retain only maximal types as determined by the partial order `po`. */
   private def maxTypes(ts: List[Type])(po: (Type, Type) => Boolean): List[Type] = {
     def loop(ts: List[Type]): List[Type] = ts match {
@@ -202,10 +207,9 @@ private[internal] trait GlbLubs {
 
     // The order here matters because type variables and
     // wildcards can act both as subtypes and supertypes.
-    val (ts2, ts1) = ts.partition(_ exists {
-      case tv: TypeVar => !tv.isGround
-      case t => t.isWildcard
-    })
+    val (ts2, ts1) = partitionConserve(ts) { tp =>
+      isWildCardOrNonGroundTypeVarCollector.collect(tp).isDefined
+    }
 
     loop(ts1 ::: ts2)
   }
@@ -233,8 +237,8 @@ private[internal] trait GlbLubs {
    */
   def sameWeakLubAsLub(tps: List[Type]) = tps match {
     case Nil       => true
-    case tp :: Nil => !typeHasAnnotations(tp)
-    case tps       => !(tps exists typeHasAnnotations) && !(tps forall isNumericValueType)
+    case tp :: Nil => tp.annotations.isEmpty
+    case tps       => tps.forall(_.annotations.isEmpty) && !(tps forall isNumericValueType)
   }
 
   /** If the arguments are all numeric value types, the numeric
@@ -248,7 +252,7 @@ private[internal] trait GlbLubs {
       NothingTpe
     else if (tps forall isNumericValueType)
       numericLub(tps)
-    else if (tps exists typeHasAnnotations)
+    else if (tps.exists(!_.annotations.isEmpty))
       annotationsLub(lub(tps map (_.withoutAnnotations)), tps)
     else
       lub(tps)
@@ -273,8 +277,8 @@ private[internal] trait GlbLubs {
     case Nil      => NothingTpe
     case t :: Nil => t
     case _        =>
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(lubCount)
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, lubNanos) else null
+      if (settings.areStatisticsEnabled) statistics.incCounter(lubCount)
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, lubNanos) else null
       try {
         val res = lub(ts, lubDepth(ts))
         // If the number of unapplied type parameters in all incoming
@@ -292,7 +296,7 @@ private[internal] trait GlbLubs {
       finally {
         lubResults.clear()
         glbResults.clear()
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+        if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
       }
   }
 
@@ -391,7 +395,7 @@ private[internal] trait GlbLubs {
             // parameters are not handled correctly.
             val ok = ts forall { t =>
               isSubType(t, lubRefined, depth.decr) || {
-                if (settings.debug || printLubs) {
+                if (settings.isDebug || printLubs) {
                   Console.println(
                     "Malformed lub: " + lubRefined + "\n" +
                       "Argument " + t + " does not conform.  Falling back to " + lubBase
@@ -415,7 +419,7 @@ private[internal] trait GlbLubs {
       indent = indent + "  "
       assert(indent.length <= 100, "LUB is highly indented")
     }
-    if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(nestedLubCount)
+    if (settings.areStatisticsEnabled) statistics.incCounter(nestedLubCount)
     val res = lub0(ts)
     if (printLubs) {
       indent = indent stripSuffix "  "
@@ -440,14 +444,14 @@ private[internal] trait GlbLubs {
     case List() => AnyTpe
     case List(t) => t
     case ts0 =>
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(lubCount)
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, lubNanos) else null
+      if (settings.areStatisticsEnabled) statistics.incCounter(lubCount)
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, lubNanos) else null
       try {
         glbNorm(ts0, lubDepth(ts0))
       } finally {
         lubResults.clear()
         glbResults.clear()
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+        if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
       }
   }
 
@@ -570,7 +574,7 @@ private[internal] trait GlbLubs {
       }
     }
     // if (settings.debug.value) { println(indent + "glb of " + ts + " at depth "+depth); indent = indent + "  " } //DEBUG
-    if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(nestedLubCount)
+    if (settings.areStatisticsEnabled) statistics.incCounter(nestedLubCount)
     glb0(ts)
     // if (settings.debug.value) { indent = indent.substring(0, indent.length() - 2); log(indent + "glb of " + ts + " is " + res) }//DEBUG
   }
@@ -597,7 +601,7 @@ private[internal] trait GlbLubs {
         if (tp ne tpn) normalizeIter(tpn) else throw new NoCommonType(ptHead :: ptRest)
     }
 
-    // Since ptHead = PolyType(tparamsHead, _), no need to normalize it or unify tpaams
+    // Since ptHead = PolyType(tparamsHead, _), no need to normalize it or unify tparams
     val ntps: List[PolyType]   = ptHead :: ptRest.map(normalizeIter)
 
     val tparams1: List[Symbol] = {

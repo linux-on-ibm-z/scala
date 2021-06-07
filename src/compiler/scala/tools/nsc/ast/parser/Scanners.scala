@@ -13,15 +13,18 @@
 package scala.tools.nsc
 package ast.parser
 
+import scala.tools.nsc.settings.ScalaVersion
 import scala.tools.nsc.util.{CharArrayReader, CharArrayReaderData}
 import scala.reflect.internal.util._
 import scala.reflect.internal.Chars._
 import Tokens._
 import scala.annotation.{switch, tailrec}
-import scala.collection.mutable, mutable.{ListBuffer, ArrayBuffer}
+import scala.collection.mutable
+import mutable.{ArrayBuffer, ListBuffer}
 import scala.tools.nsc.ast.parser.xml.Utility.isNameStart
-
 import java.lang.StringBuilder
+
+import scala.tools.nsc.Reporting.WarningCategory
 
 object Cbuf {
   final val TargetCapacity = 256
@@ -66,10 +69,17 @@ trait ScannersCommon {
   }
 
   trait ScannerCommon extends CommonTokenData {
+    /** Consume and discard the next token. */
+    def nextToken(): Unit
+
     // things to fill in, in addition to buf, decodeUni which come from CharArrayReader
     def error(off: Offset, msg: String): Unit
     def incompleteInputError(off: Offset, msg: String): Unit
+    def warning(off: Offset, msg: String, category: WarningCategory): Unit
     def deprecationWarning(off: Offset, msg: String, since: String): Unit
+
+    // advance past COMMA NEWLINE RBRACE (to whichever token is the matching close bracket)
+    def skipTrailingComma(right: Token): Boolean = false
   }
 
   // Hooks for ScaladocUnitScanner and ScaladocJavaUnitScanner
@@ -159,6 +169,9 @@ trait Scanners extends ScannersCommon {
   }
 
   abstract class Scanner extends CharArrayReader with TokenData with ScannerData with ScannerCommon with DocScanner {
+    /** A switch whether operators at the start of lines can be infix operators. */
+    private var allowLeadingInfixOperators = true
+
     private def isDigit(c: Char) = java.lang.Character isDigit c
 
     private var openComments = 0
@@ -234,10 +247,7 @@ trait Scanners extends ScannersCommon {
 
     /** append Unicode character to "cbuf" buffer
      */
-    protected def putChar(c: Char): Unit = {
-//      assert(cbuf.size < 10000, cbuf)
-      cbuf.append(c)
-    }
+    protected def putChar(c: Char): Unit = cbuf.append(c)
 
     /** Determines whether this scanner should emit identifier deprecation warnings,
      *  e.g. when seeing `macro` or `then`, which are planned to become keywords in future versions of Scala.
@@ -303,6 +313,17 @@ trait Scanners extends ScannersCommon {
       }
     }
 
+    def lookingAhead[A](body: => A): A = {
+      val saved = new ScannerData {} copyFrom this
+      val aLIO = allowLeadingInfixOperators
+      allowLeadingInfixOperators = false
+      nextToken()
+      try body finally {
+        this copyFrom saved
+        allowLeadingInfixOperators = aLIO
+      }
+    }
+
     /** read next token and return last offset
      */
     def skipToken(): Offset = {
@@ -310,6 +331,21 @@ trait Scanners extends ScannersCommon {
       nextToken()
       off
     }
+
+    // used by parser to distinguish pattern P(_*, p) from trailing comma.
+    // EOF is accepted for REPL, which can't look ahead past the current line.
+    def isTrailingComma(right: Token): Boolean =
+      token == COMMA && lookingAhead(afterLineEnd() && token == right || token == EOF)
+
+    override def skipTrailingComma(right: Token): Boolean =
+      if (token == COMMA) {
+        // SIP-27 Trailing Comma (multi-line only) support
+        // If a comma is followed by a new line & then a closing paren, bracket or brace
+        // then it is a trailing comma and is ignored
+        val saved = new ScannerData {} copyFrom this
+        fetchToken()
+        (afterLineEnd() && token == right || token == EOF) || { copyFrom(saved) ; false }
+      } else false
 
     /** Allow an otherwise deprecated ident here */
     private var allowIdent: Name = nme.EMPTY
@@ -325,42 +361,57 @@ trait Scanners extends ScannersCommon {
       }
     }
 
+    // Adapt sepRegions according to last token
+    def adjustSepRegions(lastToken: Token): Unit = (lastToken: @switch) match {
+      case LPAREN =>
+        sepRegions = RPAREN :: sepRegions
+      case LBRACKET =>
+        sepRegions = RBRACKET :: sepRegions
+      case LBRACE =>
+        sepRegions = RBRACE :: sepRegions
+      case CASE =>
+        sepRegions = ARROW :: sepRegions
+      case RBRACE =>
+        while (!sepRegions.isEmpty && sepRegions.head != RBRACE)
+          sepRegions = sepRegions.tail
+        if (!sepRegions.isEmpty)
+          sepRegions = sepRegions.tail
+
+        discardDocBuffer()
+      case RBRACKET | RPAREN =>
+        if (!sepRegions.isEmpty && sepRegions.head == lastToken)
+          sepRegions = sepRegions.tail
+
+        discardDocBuffer()
+      case ARROW =>
+        if (!sepRegions.isEmpty && sepRegions.head == lastToken)
+          sepRegions = sepRegions.tail
+      case STRINGLIT =>
+        if (inMultiLineInterpolation)
+          sepRegions = sepRegions.tail.tail
+        else if (inStringInterpolation)
+          sepRegions = sepRegions.tail
+      case _ =>
+    }
+
+    /** Advance beyond a case token without marking the CASE in sepRegions.
+     *  This method should be called to skip beyond CASE tokens that are
+     *  not part of matches, i.e. no ARROW is expected after them.
+     */
+    def skipCASE(): Unit = {
+      assert(token == CASE, s"Internal error: skipCASE() called on non-case token $token")
+      nextToken()
+      sepRegions = sepRegions.tail
+    }
+
+    /** True to warn about migration change in infix syntax. */
+    private val infixMigration = settings.Xmigration.value <= ScalaVersion("2.13.2")
+
     /** Produce next token, filling TokenData fields of Scanner.
      */
     def nextToken(): Unit = {
       val lastToken = token
-      // Adapt sepRegions according to last token
-      (lastToken: @switch) match {
-        case LPAREN =>
-          sepRegions = RPAREN :: sepRegions
-        case LBRACKET =>
-          sepRegions = RBRACKET :: sepRegions
-        case LBRACE =>
-          sepRegions = RBRACE :: sepRegions
-        case CASE =>
-          sepRegions = ARROW :: sepRegions
-        case RBRACE =>
-          while (!sepRegions.isEmpty && sepRegions.head != RBRACE)
-            sepRegions = sepRegions.tail
-          if (!sepRegions.isEmpty)
-            sepRegions = sepRegions.tail
-
-          discardDocBuffer()
-        case RBRACKET | RPAREN =>
-          if (!sepRegions.isEmpty && sepRegions.head == lastToken)
-            sepRegions = sepRegions.tail
-
-          discardDocBuffer()
-        case ARROW =>
-          if (!sepRegions.isEmpty && sepRegions.head == lastToken)
-            sepRegions = sepRegions.tail
-        case STRINGLIT =>
-          if (inMultiLineInterpolation)
-            sepRegions = sepRegions.tail.tail
-          else if (inStringInterpolation)
-            sepRegions = sepRegions.tail
-        case _ =>
-      }
+      adjustSepRegions(lastToken)
 
       // Read a token or copy it from `next` tokenData
       if (next.token == EMPTY) {
@@ -380,6 +431,51 @@ trait Scanners extends ScannersCommon {
         next.token = EMPTY
       }
 
+      def isSimpleExprIntroToken(token: Token): Boolean = token match {
+        case CHARLIT | INTLIT | LONGLIT | FLOATLIT | DOUBLELIT |
+             STRINGLIT | INTERPOLATIONID | SYMBOLLIT | TRUE | FALSE | NULL | // literals
+             IDENTIFIER | BACKQUOTED_IDENT | THIS | SUPER | NEW | USCORE |
+             LPAREN | LBRACE | XMLSTART => true
+        case _ => false
+      }
+
+      def insertNL(nl: Token): Unit = {
+        next.copyFrom(this)
+        //  todo: make offset line-end of previous line?
+        offset = if (lineStartOffset <= offset) lineStartOffset else lastLineStartOffset
+        token = nl
+      }
+
+      def isOperator: Boolean = token == BACKQUOTED_IDENT || token == IDENTIFIER && isOperatorPart(name.charAt(name.length - 1))
+
+      /* A leading infix operator must be followed by a lexically suitable expression.
+       * Usually any simple expr will do. However, a backquoted identifier may serve as
+       * either an op or a reference. So the additional constraint is that the following
+       * token can't be an assignment operator. (Dotty disallows binary ops, hence the
+       * test for unary.) See run/multiLineOps.scala for 42 + `x` on 3 lines, where +
+       * is not leading infix because backquoted x is non-unary op.
+       */
+      def followedByInfixRHS: Boolean = {
+        //def isCandidateInfixRHS: Boolean = isSimpleExprIntroToken(token) && (!isOperator || nme.raw.isUnary(name) || token == BACKQUOTED_IDENT)
+        def isAssignmentOperator: Boolean =
+          name.endsWith('=') && !name.startsWith('=') && isOperatorPart(name.startChar) &&
+          (name.length != 2 || (name.startChar match { case '!' | '<' | '>' => false case _ => true }))
+        def isCandidateInfixRHS: Boolean = isSimpleExprIntroToken(token) && (!isOperator || token == BACKQUOTED_IDENT || !isAssignmentOperator)
+        lookingAhead {
+          isCandidateInfixRHS || token == NEWLINE && { nextToken() ; isCandidateInfixRHS }
+        }
+      }
+
+      /* A leading symbolic or backquoted identifier is treated as an infix operator
+       * if it is followed by at least one ' ' and a token on the same line
+       * that can start an expression.
+       */
+      def isLeadingInfixOperator =
+        allowLeadingInfixOperators &&
+        isOperator &&
+        (isWhitespace(ch) || ch == LF) &&
+        followedByInfixRHS
+
       /* Insert NEWLINE or NEWLINES if
        * - we are after a newline
        * - we are within a { ... } or on toplevel (wrt sepRegions)
@@ -388,12 +484,23 @@ trait Scanners extends ScannersCommon {
        */
       if (!applyBracePatch() && afterLineEnd() && inLastOfStat(lastToken) && inFirstOfStat(token) &&
           (sepRegions.isEmpty || sepRegions.head == RBRACE)) {
-        next copyFrom this
-        offset = if (lineStartOffset <= offset) lineStartOffset else lastLineStartOffset
-        token = if (pastBlankLine()) NEWLINES else NEWLINE
+        if (pastBlankLine()) insertNL(NEWLINES)
+        else if (!isLeadingInfixOperator) insertNL(NEWLINE)
+        else if (!currentRun.isScala3) {
+          val msg = """|Line starts with an operator that in future
+                       |will be taken as an infix expression continued from the previous line.
+                       |To force the previous interpretation as a separate statement,
+                       |add an explicit `;`, add an empty line, or remove spaces after the operator."""
+          if (infixMigration) deprecationWarning(msg.stripMargin, "2.13.2")
+          insertNL(NEWLINE)
+        }
       }
+      postProcessToken()
+//      print("["+this+"]")
+    } // end nextToken
 
-      // Join CASE + CLASS => CASECLASS, CASE + OBJECT => CASEOBJECT, SEMI + ELSE => ELSE
+    // Join CASE + CLASS => CASECLASS, CASE + OBJECT => CASEOBJECT, SEMI + ELSE => ELSE
+    def postProcessToken(): Unit =
       if (token == CASE) {
         prev copyFrom this
         val nextLastOffset = charOffset - 1
@@ -420,21 +527,7 @@ trait Scanners extends ScannersCommon {
           next copyFrom this
           this copyFrom prev
         }
-      } else if (token == COMMA) {
-        // SIP-27 Trailing Comma (multi-line only) support
-        // If a comma is followed by a new line & then a closing paren, bracket or brace
-        // then it is a trailing comma and is ignored
-        val saved = new ScannerData {} copyFrom this
-        fetchToken()
-        if (afterLineEnd() && (token == RPAREN || token == RBRACKET || token == RBRACE)) {
-          /* skip the trailing comma */
-        } else if (token == EOF) { // e.g. when the REPL is parsing "val List(x, y, _*,"
-          /* skip the trailing comma */
-        } else this copyFrom saved
       }
-
-//      print("["+this+"]")
-    }
 
     /** Is current token first one after a newline? */
     private def afterLineEnd(): Boolean =
@@ -526,8 +619,11 @@ trait Scanners extends ScannersCommon {
             nextChar()
             ch match {
               case 'x' | 'X' => base = 16 ; nextChar()
-              case _         => base = 8    // single decimal zero, perhaps
+              //case 'b' | 'B' => base = 2  ; nextChar()
+              case _         => base = 10 ; putChar('0')
             }
+            if (base != 10 && !isNumberSeparator(ch) && digit2int(ch, base) < 0)
+              syntaxError("invalid literal number")
           }
           fetchLeadingZero()
           getNumber()
@@ -601,15 +697,13 @@ trait Scanners extends ScannersCommon {
               charLitOr(() => getIdentRest())
             else if (isOperatorPart(ch) && (ch != '\\'))
               charLitOr(() => getOperatorRest())
-            else if (!isAtEnd && (ch != SU && ch != CR && ch != LF || isUnicodeEscape)) {
+            else if (!isAtEnd && (ch != SU && ch != CR && ch != LF)) {
               val isEmptyCharLit = (ch == '\'')
               getLitChar()
               if (ch == '\'') {
-                if (isEmptyCharLit && currentRun.isScala213)
+                if (isEmptyCharLit)
                   syntaxError("empty character literal (use '\\'' for single quote)")
                 else {
-                  if (isEmptyCharLit)
-                    deprecationWarning("deprecated syntax for character literal (use '\\'' for single quote)", "2.12.2")
                   nextChar()
                   token = CHARLIT
                   setStrVal()
@@ -789,13 +883,35 @@ trait Scanners extends ScannersCommon {
       } else unclosedStringLit()
     }
 
-    private def unclosedStringLit(): Unit = syntaxError("unclosed string literal")
+    private def unclosedStringLit(seenEscapedQuoteInInterpolation: Boolean = false): Unit = {
+      val note =
+        if (seenEscapedQuoteInInterpolation) "; note that `\\\"` no longer closes single-quoted interpolated string literals since 2.13.6, you can use a triple-quoted string instead"
+        else ""
+      syntaxError(s"unclosed string literal$note")
+    }
+
+    private def replaceUnicodeEscapesInTriple(): Unit = 
+      if(strVal != null) {
+        try {
+          val replaced = StringContext.processUnicode(strVal)
+          if(replaced != strVal) {
+            val diffPosition = replaced.zip(strVal).zipWithIndex.collectFirst{ case ((r, o), i) if r != o => i}.getOrElse(replaced.length - 1)
+            deprecationWarning(offset + 3 + diffPosition, "Unicode escapes in triple quoted strings are deprecated, use the literal character instead", since="2.13.2")
+          }
+          strVal = replaced
+        } catch {
+          case ue: StringContext.InvalidUnicodeEscapeException => {
+            syntaxError(offset + 3 + ue.index, ue.getMessage())
+          }
+        }
+      }
 
     @tailrec private def getRawStringLit(): Unit = {
       if (ch == '\"') {
         nextRawChar()
         if (isTripleQuote()) {
           setStrVal()
+          if(!currentRun.isScala3) replaceUnicodeEscapesInTriple()
           token = STRINGLIT
         } else
           getRawStringLit()
@@ -808,7 +924,8 @@ trait Scanners extends ScannersCommon {
       }
     }
 
-    @tailrec private def getStringPart(multiLine: Boolean): Unit = {
+    // for interpolated strings
+    @tailrec private def getStringPart(multiLine: Boolean, seenEscapedQuote: Boolean = false): Unit = {
       def finishStringPart() = {
         setStrVal()
         token = STRINGPART
@@ -822,18 +939,27 @@ trait Scanners extends ScannersCommon {
             setStrVal()
             token = STRINGLIT
           } else
-            getStringPart(multiLine)
+            getStringPart(multiLine, seenEscapedQuote)
         } else {
           nextChar()
           setStrVal()
           token = STRINGLIT
         }
-      } else if (ch == '$') {
+      } else if (ch == '\\' && !multiLine) {
+        putChar(ch)
         nextRawChar()
-        if (ch == '$') {
+        val q = ch == '"'
+        if (q || ch == '\\') {
           putChar(ch)
           nextRawChar()
-          getStringPart(multiLine)
+        }
+        getStringPart(multiLine, seenEscapedQuote || q)
+      } else if (ch == '$') {
+        nextRawChar()
+        if (ch == '$' || ch == '"') {
+          putChar(ch)
+          nextRawChar()
+          getStringPart(multiLine, seenEscapedQuote)
         } else if (ch == '{') {
           finishStringPart()
           nextRawChar()
@@ -856,20 +982,22 @@ trait Scanners extends ScannersCommon {
             next.token = kwArray(idx)
           }
         } else {
-          syntaxError(s"invalid string interpolation $$$ch, expected: $$$$, $$identifier or $${expression}")
+          val expectations = "$$, $\", $identifier or ${expression}"
+          syntaxError(s"invalid string interpolation $$$ch, expected: $expectations")
         }
       } else {
-        val isUnclosedLiteral = !isUnicodeEscape && (ch == SU || (!multiLine && (ch == CR || ch == LF)))
+        val isUnclosedLiteral = (ch == SU || (!multiLine && (ch == CR || ch == LF)))
         if (isUnclosedLiteral) {
           if (multiLine)
             incompleteInputError("unclosed multi-line string literal")
-          else
-            unclosedStringLit()
+          else {
+            unclosedStringLit(seenEscapedQuote)
+          }
         }
         else {
           putChar(ch)
           nextRawChar()
-          getStringPart(multiLine)
+          getStringPart(multiLine, seenEscapedQuote)
         }
       }
     }
@@ -922,31 +1050,64 @@ trait Scanners extends ScannersCommon {
           syntaxError(start, s"octal escape literals are unsupported: use $alt instead")
           putChar(oct.toChar)
         } else {
-          ch match {
-            case 'b'  => putChar('\b')
-            case 't'  => putChar('\t')
-            case 'n'  => putChar('\n')
-            case 'f'  => putChar('\f')
-            case 'r'  => putChar('\r')
-            case '\"' => putChar('\"')
-            case '\'' => putChar('\'')
-            case '\\' => putChar('\\')
-            case _    => invalidEscape()
+          if (ch == 'u') {
+            if (getUEscape()) nextChar()
           }
-          nextChar()
+          else {
+            ch match {
+              case 'b'  => putChar('\b')
+              case 't'  => putChar('\t')
+              case 'n'  => putChar('\n')
+              case 'f'  => putChar('\f')
+              case 'r'  => putChar('\r')
+              case '\"' => putChar('\"')
+              case '\'' => putChar('\'')
+              case '\\' => putChar('\\')
+              case _    => invalidEscape()
+            }
+            nextChar()
+          }
         }
       } else  {
         putChar(ch)
         nextChar()
       }
 
+    private def getUEscape(): Boolean = {
+      while (ch == 'u') nextChar()
+      var codepoint = 0
+      var digitsRead = 0
+      while (digitsRead < 4) {
+        if (digitsRead > 0) nextChar()
+        val digit = digit2int(ch, 16)
+        digitsRead += 1
+        if (digit >= 0) {
+          codepoint = codepoint << 4
+          codepoint += digit
+        }
+        else {
+          invalidUnicodeEscape(digitsRead)
+          return false
+        }
+      }
+      val found = codepoint.asInstanceOf[Char]
+      putChar(found)
+      true
+    }
+    
+
     protected def invalidEscape(): Unit = {
       syntaxError(charOffset - 1, "invalid escape character")
       putChar(ch)
     }
 
+    protected def invalidUnicodeEscape(n: Int): Unit = {
+      syntaxError(charOffset - n, "invalid unicode escape")
+      putChar(ch)
+    }
+
     private def getLitChars(delimiter: Char) = {
-      while (ch != delimiter && !isAtEnd && (ch != SU && ch != CR && ch != LF || isUnicodeEscape))
+      while (ch != delimiter && !isAtEnd && (ch != SU && ch != CR && ch != LF))
         getLitChar()
     }
 
@@ -965,13 +1126,15 @@ trait Scanners extends ScannersCommon {
         if (lookahead.ch == '+' || lookahead.ch == '-') {
           lookahead.nextChar()
         }
-        if ('0' <= lookahead.ch && lookahead.ch <= '9') {
+        if ('0' <= lookahead.ch && lookahead.ch <= '9' || isNumberSeparator(lookahead.ch)) {
           putChar(ch)
           nextChar()
           if (ch == '+' || ch == '-') {
             putChar(ch)
             nextChar()
           }
+          if (isNumberSeparator(ch))
+            syntaxError(offset + cbuf.length, "illegal separator")
           while ('0' <= ch && ch <= '9' || isNumberSeparator(ch)) {
             putChar(ch)
             nextChar()
@@ -994,34 +1157,25 @@ trait Scanners extends ScannersCommon {
       setStrVal()
     }
 
-    /** Convert current strVal to char value
+    /** Convert current strVal to char value.
      */
-    def charVal: Char = if (strVal.length > 0) strVal.charAt(0) else 0
+    def charVal: Char = if (!strVal.isEmpty) strVal.charAt(0) else 0
 
     /** Convert current strVal, base to long value.
      *  This is tricky because of max negative value.
      *
-     *  Conversions in base 10 and 16 are supported. As a permanent migration
-     *  path, attempts to write base 8 literals except `0` emit a verbose error.
+     *  Conversions in base 2, 10 and 16 are supported.
+     *  Number separators are skipped on the fly.
      */
     def intVal(negated: Boolean): Long = {
       def intConvert: Long = {
-        def malformed: Long = { syntaxError("malformed integer number") ; 0 }
-        def tooBig: Long = { syntaxError("integer number too large") ; 0 }
-        val len = strVal.length
-        if (len == 0) {
-          if (base != 8) syntaxError("missing integer number")  // e.g., 0x;
-          0                                                     // 0 still looks like octal prefix
-        } else {
-          if (base == 8) {
-            if (settings.warnOctalLiteral)
-              deprecationWarning("Decimal integer literals should not have a leading zero. (Octal syntax is obsolete.)" , since="2.10")
-            base = 10
-          }
+        def convertIt: Long = {
+          def malformed: Long = { syntaxError("malformed integer number") ; 0 }
+          def tooBig: Long = { syntaxError("integer number too large") ; 0 }
           val divider     = if (base == 10) 1 else 2
           val limit: Long = if (token == LONGLIT) Long.MaxValue else Int.MaxValue
           @tailrec def convert(value: Long, i: Int): Long =
-            if (i >= len) value
+            if (i >= strVal.length) value
             else {
               val c = strVal.charAt(i)
               if (isNumberSeparator(c)) convert(value, i + 1)
@@ -1041,11 +1195,19 @@ trait Scanners extends ScannersCommon {
           val result = convert(0, 0)
           if (negated) -result else result
         }
+        if (strVal.isEmpty) {
+          syntaxError("missing integer number") // e.g., 0x; previous error shadows this one
+          0L
+        } else {
+          if (settings.warnOctalLiteral && base == 10 && strVal.charAt(0) == '0' && strVal.length() > 1)
+            deprecationWarning("Decimal integer literals should not have a leading zero. (Octal syntax is obsolete.)", since="2.10")
+          convertIt
+        }
       }
       if (token == CHARLIT && !negated) charVal.toLong else intConvert
     }
 
-    def intVal: Long = intVal(negated = false)
+    @`inline` def intVal: Long = intVal(negated = false)
 
     private val zeroFloat = raw"[0.]+(?:[eE][+-]?[0-9]+)?[fFdD]?".r
 
@@ -1067,7 +1229,7 @@ trait Scanners extends ScannersCommon {
       }
     }
 
-    def floatVal: Float = floatVal(negated = false)
+    @`inline` def floatVal: Float = floatVal(negated = false)
 
     /** Convert current strVal, base to double value.
      */
@@ -1087,34 +1249,29 @@ trait Scanners extends ScannersCommon {
       }
     }
 
-    def doubleVal: Double = doubleVal(negated = false)
+    @`inline` def doubleVal: Double = doubleVal(negated = false)
 
-    def checkNoLetter(): Unit = {
-      if (isIdentifierPart(ch) && ch >= ' ')
-        syntaxError("Invalid literal number")
-    }
+    @`inline` def checkNoLetter(): Unit = if (isIdentifierPart(ch) && ch >= ' ') syntaxError("invalid literal number")
 
-    @inline private def isNumberSeparator(c: Char): Boolean = c == '_'
+    @`inline` private def isNumberSeparator(c: Char): Boolean = c == '_'
 
-    @inline private def removeNumberSeparators(s: String): String =
-      if (s.indexOf('_') > 0) s.replace("_", "") else s
+    @`inline` private def removeNumberSeparators(s: String): String = if (s.indexOf('_') > 0) s.replace("_", "") else s
 
-    // disallow trailing numeric separator char, but let lexing limp along
+    @`inline` private def numberOffset = offset + (if (base == 10) 0 else 2)
+
+    // disallow trailing numeric separator char
     def checkNoTrailingSeparator(): Unit =
-      if (!cbuf.isEmpty && isNumberSeparator(cbuf.last)) {
-        syntaxError(offset + cbuf.length - 1, "trailing separator is not allowed")
-        cbuf.setLength(cbuf.length - 1)
-      }
+      if (!cbuf.isEmpty && isNumberSeparator(cbuf.last))
+        syntaxError(numberOffset + cbuf.length - 1, "illegal separator")
 
     /** Read a number into strVal.
      *
-     *  The `base` can be 8, 10 or 16, where base 8 flags a leading zero.
-     *  For ints, base 8 is legal only for the case of exactly one zero.
+     *  The `base` can be 2, 10 or 16.
      */
     protected def getNumber(): Unit = {
-      // consume digits of a radix
-      def consumeDigits(radix: Int): Unit =
-        while (isNumberSeparator(ch) || digit2int(ch, radix) >= 0) {
+      // consume digits of the current radix
+      def consumeDigits(): Unit =
+        while (isNumberSeparator(ch) || digit2int(ch, base) >= 0) {
           putChar(ch)
           nextChar()
         }
@@ -1127,24 +1284,24 @@ trait Scanners extends ScannersCommon {
       // 1l is an acknowledged bad practice
       def lintel(): Unit = {
         val msg = "Lowercase el for long is not recommended because it is easy to confuse with numeral 1; use uppercase L instead"
-        if (ch == 'l') deprecationWarning(offset + cbuf.length, msg, since="2.13.0")
+        if (ch == 'l') deprecationWarning(numberOffset + cbuf.length, msg, since="2.13.0")
       }
-      // after int: 5e7f, 42L, 42.toDouble but not 42b. Repair 0d.
+      // after int: 5e7f, 42L, 42.toDouble but not 42b.
       def restOfNumber(): Unit = {
         ch match {
           case 'e' | 'E' | 'f' | 'F' |
-               'd' | 'D' => if (cbuf.isEmpty) putChar('0'); getFraction()
+               'd' | 'D' => getFraction()
           case 'l' | 'L' => lintel() ; token = LONGLIT ; setStrVal() ; nextChar()
           case _         => token = INTLIT  ; setStrVal() ; checkNoLetter()
         }
       }
 
       // consume leading digits, provisionally an Int
-      consumeDigits(if (base == 16) 16 else 10)
+      consumeDigits()
 
       checkNoTrailingSeparator()
 
-      val detectedFloat: Boolean = base != 16 && ch == '.' && isDigit(lookaheadReader.getc)
+      val detectedFloat: Boolean = base == 10 && ch == '.' && isDigit(lookaheadReader.getc())
       if (detectedFloat) restOfNonIntegralNumber() else restOfNumber()
     }
 
@@ -1302,6 +1459,8 @@ trait Scanners extends ScannersCommon {
 
   final val token2name = (allKeywords map (_.swap)).toMap
 
+  final val softModifierNames = Set(nme.open, nme.infix)
+
 // Token representation ----------------------------------------------------
 
   /** Returns the string representation of given token. */
@@ -1343,9 +1502,9 @@ trait Scanners extends ScannersCommon {
    */
   class SourceFileScanner(val source: SourceFile) extends Scanner {
     val buf = source.content
-    override val decodeUni: Boolean = !settings.nouescape
 
     // suppress warnings, throw exception on errors
+    def warning(off: Offset, msg: String, category: WarningCategory): Unit = ()
     def deprecationWarning(off: Offset, msg: String, since: String): Unit = ()
     def error(off: Offset, msg: String): Unit = throw new MalformedInput(off, msg)
     def incompleteInputError(off: Offset, msg: String): Unit = throw new MalformedInput(off, msg)
@@ -1356,9 +1515,10 @@ trait Scanners extends ScannersCommon {
   class UnitScanner(val unit: CompilationUnit, patches: List[BracePatch]) extends SourceFileScanner(unit.source) {
     def this(unit: CompilationUnit) = this(unit, List())
 
-    override def deprecationWarning(off: Offset, msg: String, since: String) = currentRun.reporting.deprecationWarning(unit.position(off), msg, since)
-    override def error(off: Offset, msg: String)                             = reporter.error(unit.position(off), msg)
-    override def incompleteInputError(off: Offset, msg: String)              = currentRun.parsing.incompleteInputError(unit.position(off), msg)
+    override def warning(off: Offset, msg: String, category: WarningCategory): Unit   = runReporting.warning(unit.position(off), msg, category, site = "")
+    override def deprecationWarning(off: Offset, msg: String, since: String)          = runReporting.deprecationWarning(unit.position(off), msg, since, site = "", origin = "")
+    override def error(off: Offset, msg: String)                                      = reporter.error(unit.position(off), msg)
+    override def incompleteInputError(off: Offset, msg: String)                       = currentRun.parsing.incompleteInputError(unit.position(off), msg)
 
     private var bracePatches: List[BracePatch] = patches
 

@@ -17,6 +17,7 @@ import scala.annotation.tailrec
 import symtab._
 import util.DocStrings._
 import scala.collection.mutable
+import scala.tools.nsc.Reporting.WarningCategory
 
 /*
  *  @author  Martin Odersky
@@ -57,8 +58,10 @@ trait DocComments { self: Global =>
    *  since r23926.
    */
   private def allInheritedOverriddenSymbols(sym: Symbol): List[Symbol] = {
-    if (!sym.owner.isClass) Nil
-    else sym.owner.ancestors map (sym overriddenSymbol _) filter (_ != NoSymbol)
+    val getter: Symbol = sym.getter
+    val symOrGetter = getter.orElse(sym)
+    if (!symOrGetter.owner.isClass) Nil
+    else symOrGetter.owner.ancestors map (symOrGetter overriddenSymbol _) filter (_ != NoSymbol)
   }
 
   def fillDocComment(sym: Symbol, comment: DocComment): Unit = {
@@ -86,7 +89,7 @@ trait DocComments { self: Global =>
       case None =>
         // scala/bug#8210 - The warning would be false negative when this symbol is a setter
         if (ownComment.indexOf("@inheritdoc") != -1 && ! sym.isSetter)
-          reporter.warning(sym.pos, s"The comment for ${sym} contains @inheritdoc, but no parent comment is available to inherit from.")
+          runReporting.warning(sym.pos, s"The comment for ${sym} contains @inheritdoc, but no parent comment is available to inherit from.", WarningCategory.Scaladoc, sym)
         ownComment.replace("@inheritdoc", "<invalid inheritdoc annotation>")
       case Some(sc) =>
         if (ownComment == "") sc
@@ -142,8 +145,7 @@ trait DocComments { self: Global =>
 
   /** The cooked doc comment of an overridden symbol */
   protected def superComment(sym: Symbol): Option[String] = {
-    val getter: Symbol = sym.getter
-    allInheritedOverriddenSymbols(getter.orElse(sym)).iterator
+    allInheritedOverriddenSymbols(sym).iterator
       .map(cookedDocComment(_))
       .find(_ != "")
   }
@@ -364,7 +366,7 @@ trait DocComments { self: Global =>
                 case None              =>
                   val pos = docCommentPos(sym)
                   val loc = pos withPoint (pos.start + vstart + 1)
-                  reporter.warning(loc, s"Variable $vname undefined in comment for $sym in $site")
+                  runReporting.warning(loc, s"Variable $vname undefined in comment for $sym in $site", WarningCategory.Scaladoc, sym)
               }
             }
         }
@@ -411,7 +413,7 @@ trait DocComments { self: Global =>
       val comment      = "/** " + raw.substring(commentStart, end) + "*/"
       val commentPos   = subPos(commentStart, end)
 
-      self.currentRun.reporting.deprecationWarning(codePos, "The @usecase tag is deprecated, instead use the @example tag to document the usage of your API", "2.13.0")
+      runReporting.deprecationWarning(codePos, "The @usecase tag is deprecated, instead use the @example tag to document the usage of your API", "2.13.0", site = "", origin = "")
 
       UseCase(DocComment(comment, commentPos, codePos), code, codePos)
     }
@@ -420,7 +422,7 @@ trait DocComments { self: Global =>
       if (pos == NoPosition) NoPosition
       else {
         val start1 = pos.start + start
-        val end1 = pos.end + end
+        val end1 = pos.start + end
         pos withStart start1 withPoint start1 withEnd end1
       }
 
@@ -434,8 +436,8 @@ trait DocComments { self: Global =>
           key.drop(start) -> value
         }
       } map {
-        case (key, Trim(value)) =>
-          variableName(key) -> value.replaceAll("\\s+\\*+$", "")
+        case (key, Trim(value)) => variableName(key) -> value.replaceAll("\\s+\\*+$", "")
+        case x                  => throw new MatchError(x)
       }
     }
   }
@@ -495,9 +497,11 @@ trait DocComments { self: Global =>
         }
         val result = rest.foldLeft(start)(select(_, _, NoType))
         if (result == NoType)
-          reporter.warning(comment.codePos, "Could not find the type " + variable + " points to while expanding it " +
-                                            "for the usecase signature of " + sym + " in " + site + "." +
-                                            "In this context, " + variable + " = \"" + str + "\".")
+          runReporting.warning(
+            comment.codePos,
+            s"""Could not find the type $variable points to while expanding it for the usecase signature of $sym in $site. In this context, $variable = "$str".""",
+            WarningCategory.Scaladoc,
+            site)
         result
       }
 

@@ -29,18 +29,33 @@ trait FastStringInterpolator extends FormatInterpolator {
       parts.forall(treeInfo.isLiteralString) &&
       parts.length == (args.length + 1) =>
 
-      val treated =
-        if (isRaw) parts
-        else
-          try
-            parts.mapConserve { case lit@Literal(Constant(stringVal: String)) =>
-              val k = Constant(StringContext.processEscapes(stringVal))
+      val treated = 
+        try
+          parts.mapConserve {
+            case lit @ Literal(Constant(stringVal: String)) =>
+              val value =
+                if (isRaw && currentRun.isScala3) stringVal
+                else if (isRaw) {
+                  val processed = StringContext.processUnicode(stringVal)
+                  if (processed != stringVal) {
+                    val diffindex = processed.zip(stringVal).zipWithIndex.collectFirst {
+                      case ((p, o), i) if p != o => i
+                    }.getOrElse(processed.length - 1)
+
+                    runReporting.deprecationWarning(lit.pos.withShift(diffindex), "Unicode escapes in raw interpolations are deprecated. Use literal characters instead.", "2.13.2", "", "")
+                  }
+                  processed
+                }
+                else StringContext.processEscapes(stringVal)
+              val k = Constant(value)
               // To avoid the backlash of backslash, taken literally by Literal, escapes are processed strictly (scala/bug#11196)
               treeCopy.Literal(lit, k).setType(ConstantType(k))
-            }
-          catch {
-            case e: StringContext.InvalidEscapeException => c.abort(parts.head.pos.withShift(e.index), e.getMessage)
+            case x => throw new MatchError(x)
           }
+        catch {
+          case ie: StringContext.InvalidEscapeException => c.abort(parts.head.pos.withShift(ie.index), ie.getMessage)
+          case iue: StringContext.InvalidUnicodeEscapeException => c.abort(parts.head.pos.withShift(iue.index), iue.getMessage)
+        }
 
       val argsIndexed = args.toVector
       val concatArgs = collection.mutable.ListBuffer[Tree]()
@@ -86,5 +101,6 @@ trait FastStringInterpolator extends FormatInterpolator {
           $args,
           sc.parts)
       }"""
+    case x => throw new MatchError(x)
   }
 }

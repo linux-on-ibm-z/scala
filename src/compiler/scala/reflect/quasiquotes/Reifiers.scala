@@ -13,7 +13,6 @@
 package scala.reflect
 package quasiquotes
 
-import java.lang.UnsupportedOperationException
 import scala.reflect.reify.{Reifier => ReflectReifier}
 import scala.reflect.internal.Flags._
 
@@ -72,7 +71,7 @@ trait Reifiers { self: Quasiquotes =>
         val freshdefs = nameMap.iterator.map {
           case (origname, names) =>
             assert(names.size == 1, "Require one name")
-            val FreshName(prefix) = origname
+            val FreshName(prefix) = origname: @unchecked
             val nameTypeName = if (origname.isTermName) tpnme.TermName else tpnme.TypeName
             val freshName = if (origname.isTermName) nme.freshTermName else nme.freshTypeName
             // q"val ${names.head}: $u.$nameTypeName = $u.internal.reificationSupport.$freshName($prefix)"
@@ -86,7 +85,7 @@ trait Reifiers { self: Quasiquotes =>
         val isVarPattern = tree match { case Bind(name, Ident(nme.WILDCARD)) => true case _ => false }
         val cases =
           if(isVarPattern) {
-            val Ident(name) :: Nil = freevars
+            val Ident(name) :: Nil = freevars: @unchecked
             // cq"$name: $treeType => $SomeModule($name)" :: Nil
             CaseDef(Bind(name, Typed(Ident(nme.WILDCARD), TypeTree(treeType))),
               EmptyTree, Apply(Ident(SomeModule), List(Ident(name)))) :: Nil
@@ -104,9 +103,9 @@ trait Reifiers { self: Quasiquotes =>
             }
             val guard =
               nameMap.collect { case (_, nameset) if nameset.size >= 2 =>
-                nameset.toList.sliding(2).map { case List(n1, n2) =>
-                  // q"$n1 == $n2"
-                  Apply(Select(Ident(n1), nme.EQ), List(Ident(n2)))
+                nameset.toList.sliding(2).map {
+                  case List(n1, n2) => Apply(Select(Ident(n1), nme.EQ), List(Ident(n2))) // q"$n1 == $n2"
+                  case x            => throw new MatchError(x)
                 }
               }.flatten.reduceOption[Tree] { (l, r) =>
                 // q"$l && $r"
@@ -422,7 +421,7 @@ trait Reifiers { self: Quasiquotes =>
           case List(elem) if fill.isDefinedAt(elem) => fill(elem)
           case elems => mkList(elems.map(fallback))
         }
-        val head :: tail = group(xs) { (a, b) => !fill.isDefinedAt(a) && !fill.isDefinedAt(b) }
+        val head :: tail = group(xs) { (a, b) => !fill.isDefinedAt(a) && !fill.isDefinedAt(b) }: @unchecked
         tail.foldLeft[Tree](reifyGroup(head)) { (tree, lst) => Apply(Select(tree, nme.PLUSPLUS), List(reifyGroup(lst))) }
       }
 
@@ -435,6 +434,7 @@ trait Reifiers { self: Quasiquotes =>
         }
         val (mods, flags) = modsPlaceholders.map {
           case ModsPlaceholder(hole: ApplyHole) => hole
+          case x                                => throw new MatchError(x)
         }.partition { hole =>
           if (hole.tpe <:< modsType) true
           else if (hole.tpe <:< flagsType) false

@@ -12,8 +12,6 @@
 
 package scala.collection.mutable
 
-import java.lang.String
-
 import scala.collection.{IterableFactoryDefaults, IterableOnce}
 import scala.collection.immutable.WrappedString
 
@@ -23,7 +21,7 @@ import scala.Predef.{ // unimport char-related implicit conversions to avoid tri
   genericWrapArray => _,
   wrapCharArray => _,
   wrapString => _,
-  _
+ //_
 }
 
 /** A builder for mutable sequence of characters.  This class provides an API
@@ -34,7 +32,7 @@ import scala.Predef.{ // unimport char-related implicit conversions to avoid tri
   *
   * @define Coll `mutable.IndexedSeq`
   * @define coll string builder
-  * @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#stringbuilders "Scala's Collection Library overview"]]
+  * @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#stringbuilders "Scala's Collection Library overview"]]
   * section on `StringBuilders` for more information.
   */
 @SerialVersionUID(3L)
@@ -468,6 +466,14 @@ final class StringBuilder(val underlying: java.lang.StringBuilder) extends Abstr
    *  @return             the last applicable index where target occurs, or -1 if not found.
    */
   def lastIndexOf(str: String, fromIndex: Int): Int = underlying.lastIndexOf(str, fromIndex)
+
+  /** Tests whether this builder is empty.
+   *
+   *  This method is required for JDK15+ compatibility
+   *
+   *  @return  `true` if this builder contains nothing, `false` otherwise.
+   */
+  override def isEmpty: Boolean = underlying.length() == 0
 }
 
 object StringBuilder {

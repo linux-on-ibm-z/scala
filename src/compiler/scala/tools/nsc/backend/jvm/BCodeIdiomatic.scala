@@ -23,7 +23,7 @@ import scala.tools.nsc.backend.jvm.GenBCode._
 /*
  *  A high-level facade to the ASM API for bytecode generation.
  *
- *  @author  Miguel Garcia, http://lamp.epfl.ch/~magarcia/ScalaCompilerCornerReloaded
+ *  @author  Miguel Garcia, https://lampwww.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
  *
  */
 abstract class BCodeIdiomatic {
@@ -94,7 +94,7 @@ abstract class BCodeIdiomatic {
 
   /* Just a namespace for utilities that encapsulate MethodVisitor idioms.
    *  In the ASM world, org.objectweb.asm.commons.InstructionAdapter plays a similar role,
-   *  but the methods here allow choosing when to transition from ICode to ASM types
+   *  but the methods here allow choosing when to transition from BType to ASM types
    *  (including not at all, e.g. for performance).
    */
   abstract class JCodeMethodN {
@@ -205,6 +205,7 @@ abstract class BCodeIdiomatic {
         // jlStringBuilder does not have overloads for byte and short, but we can just use the int version
         case BYTE | SHORT                                             => INT
         case pt: PrimitiveBType                                       => pt
+        case x @ MethodBType(_, _)                                    => throw new MatchError(x)
       }
       val bt = MethodBType(Array(paramType), jlStringBuilderRef)
       invokevirtual(JavaStringBuilderClassName, "append", bt.descriptor, pos)
@@ -288,15 +289,19 @@ abstract class BCodeIdiomatic {
     } // end of emitT2T()
 
     // can-multi-thread
-    final def boolconst(b: Boolean): Unit = { iconst(if (b) 1 else 0) }
+    final def boolconst(b: Boolean): Unit = {
+      if (b) emit(Opcodes.ICONST_1)
+      else emit(Opcodes.ICONST_0)
+    }
 
     // can-multi-thread
     final def iconst(cst: Int): Unit = {
-      if (cst >= -1 && cst <= 5) {
-        emit(Opcodes.ICONST_0 + cst)
-      } else if (cst >= java.lang.Byte.MIN_VALUE && cst <= java.lang.Byte.MAX_VALUE) {
-        jmethod.visitIntInsn(Opcodes.BIPUSH, cst)
-      } else if (cst >= java.lang.Short.MIN_VALUE && cst <= java.lang.Short.MAX_VALUE) {
+      if (cst.toByte == cst) {
+        if (cst >= -1 && cst <= 5) {
+          emit(Opcodes.ICONST_0 + cst)
+        } else
+          jmethod.visitIntInsn(Opcodes.BIPUSH, cst)
+      } else if (cst.toShort == cst) {
         jmethod.visitIntInsn(Opcodes.SIPUSH, cst)
       } else {
         jmethod.visitLdcInsn(Integer.valueOf(cst))
@@ -314,7 +319,7 @@ abstract class BCodeIdiomatic {
 
     // can-multi-thread
     final def fconst(cst: Float): Unit = {
-      val bits: Int = java.lang.Float.floatToIntBits(cst)
+      val bits: Int = java.lang.Float.floatToRawIntBits(cst)
       if (bits == 0L || bits == 0x3f800000 || bits == 0x40000000) { // 0..2
         emit(Opcodes.FCONST_0 + cst.asInstanceOf[Int])
       } else {
@@ -324,7 +329,7 @@ abstract class BCodeIdiomatic {
 
     // can-multi-thread
     final def dconst(cst: Double): Unit = {
-      val bits: Long = java.lang.Double.doubleToLongBits(cst)
+      val bits: Long = java.lang.Double.doubleToRawLongBits(cst)
       if (bits == 0L || bits == 0x3ff0000000000000L) { // +0.0d and 1.0d
         emit(Opcodes.DCONST_0 + cst.asInstanceOf[Int])
       } else {
@@ -453,7 +458,7 @@ abstract class BCodeIdiomatic {
       i = 1
       while (i < keys.length) {
         if (keys(i-1) == keys(i)) {
-          abort("duplicate keys in SWITCH, can't pick arbitrarily one of them to evict, see scala/bug#6011.")
+          abort("duplicate keys in SWITCH, can't pick arbitrarily one of them to evict, see scala/bug#6011: " + keys.sorted.toList)
         }
         i += 1
       }

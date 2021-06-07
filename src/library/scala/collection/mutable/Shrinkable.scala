@@ -40,6 +40,7 @@ trait Shrinkable[-A] {
     *  @param elems the remaining elements to remove.
     *  @return the $coll itself
     */
+  @deprecated("Use `--=` aka `subtractAll` instead of varargs `-=`; infix operations with an operand of multiple args will be deprecated", "2.13.3")
   def -= (elem1: A, elem2: A, elems: A*): this.type = {
     this -= elem1
     this -= elem2
@@ -58,9 +59,16 @@ trait Shrinkable[-A] {
         loop(xs.tail)
       }
     }
-    xs match {
-      case xs: collection.LinearSeq[A] => loop(xs)
-      case xs => xs.iterator.foreach(subtractOne)
+    if (xs.asInstanceOf[AnyRef] eq this) { // avoid mutating under our own iterator
+      xs match {
+        case xs: Clearable => xs.clear()
+        case xs            => subtractAll(Buffer.from(xs))
+      }
+    } else {
+      xs match {
+        case xs: collection.LinearSeq[A] => loop(xs)
+        case xs => xs.iterator.foreach(subtractOne)
+      }
     }
     this
   }

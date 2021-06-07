@@ -91,7 +91,7 @@ trait Typers {
    *
    *  If `silent` is false, `TypecheckException` will be thrown in case of an inference error.
    *  If `silent` is true, the typecheck is silent and will return `EmptyTree` if an error occurs.
-   *  Such errors don't vanish and can be inspected by turning on -Xlog-implicits.
+   *  Such errors don't vanish and can be inspected by turning on -Vimplicits.
    *  Unlike in `typecheck`, `silent` is true by default.
    *
    *  @throws scala.reflect.macros.TypecheckException
@@ -103,7 +103,7 @@ trait Typers {
    *
    *  If `silent` is false, `TypecheckException` will be thrown in case of an inference error.
    *  If `silent` is true, the typecheck is silent and will return `EmptyTree` if an error occurs.
-   *  Such errors don't vanish and can be inspected by turning on -Xlog-implicits.
+   *  Such errors don't vanish and can be inspected by turning on -Vimplicits.
    *  Unlike in `typecheck`, `silent` is true by default.
    *
    *  @throws scala.reflect.macros.TypecheckException
@@ -128,7 +128,7 @@ trait Typers {
    *  which makes it sometimes corrupt trees so that they don't make sense anymore. Unfortunately, there's no workaround for that.
    *  We plan to fix this issue soon, but for now please keep it in mind.
    *
-   *  @see [[http://stackoverflow.com/questions/20936509/scala-macros-what-is-the-difference-between-typed-aka-typechecked-an-untyped]]
+   *  @see [[https://stackoverflow.com/questions/20936509/scala-macros-what-is-the-difference-between-typed-aka-typechecked-an-untyped]]
    */
   def untypecheck(tree: Tree): Tree
 }

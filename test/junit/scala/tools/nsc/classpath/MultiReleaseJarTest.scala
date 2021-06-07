@@ -15,7 +15,7 @@ class MultiReleaseJarTest extends BytecodeTesting {
   import compiler._
   @Test
   def mrJar(): Unit = {
-    if (!Properties.isJavaAtLeast("9")) { println("skipping mrJar() on old JdK"); return} // TODO test that the compiler warns that --release is unsupported.
+    if (!Properties.isJavaAtLeast("9")) { println("skipping mrJar() on old JDK"); return} // TODO test that the compiler warns that --release is unsupported.
 
     val temp1 = Files.createTempFile("mr-jar-test-", ".jar")
 
@@ -62,7 +62,7 @@ class MultiReleaseJarTest extends BytecodeTesting {
       import g._
       settings.release.value = release
       new Run
-      rootMirror.getClassIfDefined(TypeName(className)) != NoSymbol
+      rootMirror.getClassIfDefined(className) != NoSymbol
     }
     Assert.assertTrue(lookup("java.lang.invoke.LambdaMetafactory", "8"))
     Assert.assertFalse(lookup("java.lang.invoke.LambdaMetafactory", "7"))

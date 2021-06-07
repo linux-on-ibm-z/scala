@@ -14,6 +14,7 @@ package scala
 package collection
 package mutable
 
+import scala.annotation.nowarn
 import scala.collection.convert.JavaCollectionWrappers.{JMapWrapper, JMapWrapperLike}
 
 /** A hash map with references to entries which are weakly reachable. Entries are
@@ -23,7 +24,7 @@ import scala.collection.convert.JavaCollectionWrappers.{JMapWrapper, JMapWrapper
  *  @tparam K      type of keys contained in this map
  *  @tparam V      type of values associated with the keys
  *
- *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#weak-hash-maps "Scala's Collection Library overview"]]
+ *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#weak-hash-maps "Scala's Collection Library overview"]]
  *  section on `Weak Hash Maps` for more information.
  *
  *  @define Coll `WeakHashMap`
@@ -37,6 +38,7 @@ class WeakHashMap[K, V] extends JMapWrapper[K, V](new java.util.WeakHashMap)
     with MapFactoryDefaults[K, V, WeakHashMap, Iterable] {
   override def empty = new WeakHashMap[K, V]
   override def mapFactory: MapFactory[WeakHashMap] = WeakHashMap
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "WeakHashMap"
 }
 

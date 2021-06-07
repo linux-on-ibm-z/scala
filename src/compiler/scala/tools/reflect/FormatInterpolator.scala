@@ -69,7 +69,7 @@ abstract class FormatInterpolator {
    *  5) "...\${smth}%%" => okay, equivalent to "...\${smth}%s%%"
    *  6) "...\${smth}[%legalJavaConversion]" => okay*
    *  7) "...\${smth}[%illegalJavaConversion]" => error
-   *  *Legal according to [[https://docs.oracle.com/javase/8/docs/api/java/util/Formatter.html]]
+   *  *Legal according to [[java.util.Formatter]]
    */
   def interpolated(parts: List[Tree], args: List[Tree]) = {
     val fstring  = new StringBuilder
@@ -156,7 +156,7 @@ abstract class FormatInterpolator {
           }
         }
         if (ms.hasNext) {
-          Conversion(ms.next, part.pos, args.size) match {
+          Conversion(ms.next(), part.pos, args.size) match {
             case Some(op) if op.isLiteral => s_%()
             case Some(op) if op.indexed =>
               if (op.index map (_ == n) getOrElse true) accept(op)
@@ -172,7 +172,7 @@ abstract class FormatInterpolator {
       }
       // any remaining conversions must be either literals or indexed
       while (ms.hasNext) {
-        Conversion(ms.next, part.pos, args.size) match {
+        Conversion(ms.next(), part.pos, args.size) match {
           case Some(op) if first && op.hasFlag('<')   => op.badFlag('<', "No last arg")
           case Some(op) if op.isLiteral || op.indexed => // OK
           case Some(op) => errorLeading(op)

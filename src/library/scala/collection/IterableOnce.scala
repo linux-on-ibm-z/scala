@@ -265,6 +265,16 @@ object IterableOnce {
     */
   @inline private[collection] def elemsToCopyToArray(srcLen: Int, destLen: Int, start: Int, len: Int): Int =
     math.max(math.min(math.min(len, srcLen), destLen - start), 0)
+
+  /** Calls `copyToArray` on the given collection, regardless of whether or not it is an `Iterable`. */
+  @inline private[collection] def copyElemsToArray[A, B >: A](elems: IterableOnce[A],
+                                                              xs: Array[B],
+                                                              start: Int = 0,
+                                                              len: Int = Int.MaxValue): Int =
+    elems match {
+      case src: Iterable[A] => src.copyToArray[B](xs, start, len)
+      case src              => src.iterator.copyToArray[B](xs, start, len)
+    }
 }
 
 /** This implementation trait can be mixed into an `IterableOnce` to get the basic methods that are shared between
@@ -526,7 +536,7 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *    actionable information. As noted above, even the collection library itself
     *    does not use it. When there is no guarantee that a collection is finite, it
     *    is generally best to attempt a computation anyway and document that it will
-    *    not terminate for inifinite collections rather than backing out because this
+    *    not terminate for infinite collections rather than backing out because this
     *    would prevent performing the computation on collections that are in fact
     *    finite even though `hasDefiniteSize` returns `false`.
     *
@@ -625,10 +635,8 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @tparam  B    the result type of the binary operator.
     *  @return  the result of inserting `op` between consecutive elements of this $coll,
     *           going left to right with the start value `z` on the left:
-    *           {{{
-    *             op(...op(z, x_1), x_2, ..., x_n)
-    *           }}}
-    *           where `x,,1,,, ..., x,,n,,` are the elements of this $coll.
+    *           `op(...op(z, x,,1,,), x,,2,,, ..., x,,n,,)` where `x,,1,,, ..., x,,n,,`
+   *            are the elements of this $coll.
     *           Returns `z` if this $coll is empty.
     */
   def foldLeft[B](z: B)(op: (B, A) => B): B = {
@@ -650,10 +658,8 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @tparam  B    the result type of the binary operator.
     *  @return  the result of inserting `op` between consecutive elements of this $coll,
     *           going right to left with the start value `z` on the right:
-    *           {{{
-    *             op(x_1, op(x_2, ... op(x_n, z)...))
-    *           }}}
-    *           where `x,,1,,, ..., x,,n,,` are the elements of this $coll.
+    *           `op(x,,1,,, op(x,,2,,, ... op(x,,n,,, z)...))` where `x,,1,,, ..., x,,n,,`
+    *           are the elements of this $coll.
     *           Returns `z` if this $coll is empty.
     */
   def foldRight[B](z: B)(op: (A, B) => B): B = reversed.foldLeft(z)((b, a) => op(a, b))
@@ -712,10 +718,8 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @tparam  B    the result type of the binary operator.
     *  @return  the result of inserting `op` between consecutive elements of this $coll,
     *           going left to right:
-    *           {{{
-    *             op( op( ... op(x_1, x_2) ..., x_{n-1}), x_n)
-    *           }}}
-    *           where `x,,1,,, ..., x,,n,,` are the elements of this $coll.
+    *           `op( op( ... op(x,,1,,, x,,2,,) ..., x,,n-1,,), x,,n,,)` where `x,,1,,, ..., x,,n,,`
+    *           are the elements of this $coll.
     *  @throws UnsupportedOperationException if this $coll is empty.   */
   def reduceLeft[B >: A](op: (B, A) => B): B = {
     val it = iterator
@@ -723,7 +727,7 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
       throw new UnsupportedOperationException("empty.reduceLeft")
 
     var first = true
-    var acc: B = 0.asInstanceOf[B]
+    var acc: B = null.asInstanceOf[B]
 
     while (it.hasNext) {
       val x = it.next()
@@ -744,10 +748,8 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @tparam  B    the result type of the binary operator.
     *  @return  the result of inserting `op` between consecutive elements of this $coll,
     *           going right to left:
-    *           {{{
-    *             op(x_1, op(x_2, ..., op(x_{n-1}, x_n)...))
-    *           }}}
-    *           where `x,,1,,, ..., x,,n,,` are the elements of this $coll.
+    *           `op(x,,1,,, op(x,,2,,, ..., op(x,,n-1,,, x,,n,,)...))` where `x,,1,,, ..., x,,n,,`
+    *           are the elements of this $coll.
     *  @throws UnsupportedOperationException if this $coll is empty.
     */
   def reduceRight[B >: A](op: (A, B) => B): B = {
@@ -827,9 +829,10 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
    *  @tparam B      the type of the elements of the array.
    *  @return        the number of elements written to the array
    *
-   *  $willNotTerminateInf
+   *  @note    Reuse: $consumesIterator
    */
-  def copyToArray[B >: A](xs: Array[B]): Int = copyToArray(xs, 0)
+  @deprecatedOverriding("This should always forward to the 3-arg version of this method", since = "2.13.4")
+  def copyToArray[B >: A](xs: Array[B]): Int = copyToArray(xs, 0, Int.MaxValue)
 
   /** Copy elements to an array, returning the number of elements written.
     *
@@ -843,18 +846,10 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @tparam B      the type of the elements of the array.
     *  @return        the number of elements written to the array
     *
-    *  $willNotTerminateInf
+    *  @note    Reuse: $consumesIterator
     */
-  def copyToArray[B >: A](xs: Array[B], start: Int): Int = {
-    val xsLen = xs.length
-    val it = iterator
-    var i = start
-    while (i < xsLen && it.hasNext) {
-      xs(i) = it.next()
-      i += 1
-    }
-    i - start
-  }
+  @deprecatedOverriding("This should always forward to the 3-arg version of this method", since = "2.13.4")
+  def copyToArray[B >: A](xs: Array[B], start: Int): Int = copyToArray(xs, start, Int.MaxValue)
 
   /** Copy elements to an array, returning the number of elements written.
     *
@@ -870,8 +865,6 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @return        the number of elements written to the array
     *
     *  @note    Reuse: $consumesIterator
-    *
-    *  $willNotTerminateInf
     */
   def copyToArray[B >: A](xs: Array[B], start: Int, len: Int): Int = {
     val it = iterator

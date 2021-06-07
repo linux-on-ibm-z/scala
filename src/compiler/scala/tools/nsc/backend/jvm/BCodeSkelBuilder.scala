@@ -21,7 +21,7 @@ import GenBCode._
 import BackendReporting._
 
 /*
- *  @author  Miguel Garcia, http://lamp.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
+ *  @author  Miguel Garcia, https://lampwww.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
  */
 abstract class BCodeSkelBuilder extends BCodeHelpers {
   import global._
@@ -533,7 +533,7 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
               val forwarderDefDef = {
                 val dd1 = global.gen.mkStatic(deriveDefDef(dd)(_ => EmptyTree), newTermName(traitSuperAccessorName(sym)), _.cloneSymbol.withoutAnnotations)
                 dd1.symbol.setFlag(Flags.ARTIFACT).resetFlag(Flags.OVERRIDE)
-                val selfParam :: realParams = dd1.vparamss.head.map(_.symbol)
+                val selfParam :: realParams = dd1.vparamss.head.map(_.symbol): @unchecked
                 deriveDefDef(dd1)(_ =>
                   atPos(dd1.pos)(
                     Apply(Select(global.gen.mkAttributedIdent(selfParam).setType(sym.owner.typeConstructor), dd.symbol),
@@ -558,7 +558,7 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
 
       val jgensig = getGenericSignature(methSymbol, claszSymbol)
 
-      val (excs, others) = methSymbol.annotations partition (_.symbol == definitions.ThrowsClass)
+      val (excs, others) = partitionConserve(methSymbol.annotations)(_.symbol == definitions.ThrowsClass)
       val thrownExceptions: List[String] = getExceptions(excs)
 
       val bytecodeName =
@@ -644,7 +644,7 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
             case Return(_) | Block(_, Return(_)) | Throw(_) | Block(_, Throw(_)) => ()
             case EmptyTree =>
               globalError("Concrete method has no definition: " + dd + (
-                if (settings.debug) "(found: " + methSymbol.owner.info.decls.toList.mkString(", ") + ")"
+                if (settings.isDebug) "(found: " + methSymbol.owner.info.decls.toList.mkString(", ") + ")"
                 else ""))
             case _ =>
               bc emitRETURN returnType

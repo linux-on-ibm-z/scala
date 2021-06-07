@@ -60,10 +60,8 @@ object ReflectionUtils {
         "<unknown>"
     }
     cl match {
-      case cl if cl != null =>
-        "%s of type %s with classpath [%s] and parent being %s".format(cl, cl.getClass, inferClasspath(cl), show(cl.getParent))
-      case null =>
-        "primordial classloader with boot classpath [%s]".format(inferClasspath(cl))
+      case null => s"primordial classloader with boot classpath [${inferClasspath(cl)}]"
+      case _    => s"$cl of type ${cl.getClass} with classpath [${inferClasspath(cl)}] and parent being ${show(cl.getParent)}"
     }
   }
 
@@ -108,7 +106,7 @@ object ReflectionUtils {
     // I think we can keep the source code though, because it can be useful to the others
     //
     // def inferAssociatedFile(clazz: Class[_]): AbstractFile = {
-    //   // http://stackoverflow.com/questions/227486/find-where-java-class-is-loaded-from
+    //   // https://stackoverflow.com/questions/227486/find-where-java-class-is-loaded-from
     //   try {
     //     var cl = clazz.getClassLoader()
     //     if (cl == null) {

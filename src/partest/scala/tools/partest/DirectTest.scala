@@ -17,11 +17,21 @@ import scala.tools.cmd.CommandLineParser
 import scala.tools.nsc._
 import scala.tools.nsc.reporters.{ConsoleReporter, Reporter}
 import scala.tools.nsc.settings.ScalaVersion
+import scala.util.chaining._
 
-/** A class for testing code which is embedded as a string.
-  *  It allows for more complete control over settings, compiler
-  *  configuration, sequence of events, etc. than does partest.
-  */
+/** Test with code which is embedded as a string.
+ *
+ *  `DirectTest` allows for more complete control over settings, compiler
+ *  configuration, sequence of events, etc. than does partest alone.
+ *
+ *  Tests must define `code` and `show()`. Minimally:
+ *  ```
+ *  def show() = assert(compile())
+ *  ```
+ *
+ *  There are helper methods for creating settings and
+ *  invoking a (newly constructed) compiler.
+ */
 abstract class DirectTest {
   // The program being tested in some fashion
   def code: String
@@ -32,26 +42,27 @@ abstract class DirectTest {
   def testPath   = SFile(sys.props("partest.test-path"))
   def testOutput = Directory(sys.props("partest.output"))
 
-  // override to add additional settings with strings
+  // override to add additional settings besides -d testOutput.path
   def extraSettings: String = ""
-  // a default Settings object
-  def settings: Settings = newSettings(CommandLineParser tokenize extraSettings)
-  // a custom Settings object
-  def newSettings(args: List[String]) = {
-    val s = new Settings
-    val allArgs = args ++ (CommandLineParser tokenize debugSettings)
-    log("newSettings: allArgs = " + allArgs)
-    s processArguments (allArgs, true)
-    s
+  // a default Settings object using only extraSettings
+  def settings: Settings = newSettings(CommandLineParser.tokenize(extraSettings))
+  // settings factory using given args and also debug settings
+  def newSettings(args: List[String]) = (new Settings).tap { s =>
+    val allArgs = args ++ CommandLineParser.tokenize(debugSettings)
+    log(s"newSettings: allArgs = $allArgs")
+    val (success, residual) = s.processArguments(allArgs, processAll = false)
+    assert(success && residual.isEmpty, s"Bad settings [${args.mkString(",")}], residual [${residual.mkString(",")}]")
   }
-  // new compiler
+  // new compiler using given ad hoc args, -d and extraSettings
   def newCompiler(args: String*): Global = {
     val settings = newSettings(CommandLineParser.tokenize(s"""-d "${testOutput.path}" ${extraSettings}""") ++ args.toList)
     newCompiler(settings)
   }
 
+  // compiler factory
   def newCompiler(settings: Settings): Global = Global(settings, reporter(settings))
 
+  // reporter factory, console by default
   def reporter(settings: Settings): Reporter = new ConsoleReporter(settings)
 
   private def newSourcesWithExtension(ext: String)(codes: String*): List[BatchSourceFile] =

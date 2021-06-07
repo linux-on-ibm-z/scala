@@ -62,12 +62,11 @@ sealed class PriorityQueue[A](implicit val ord: Ordering[A])
     with Growable[A]
     with Serializable
 {
-  import ord._
 
   private class ResizableArrayAccess[A0] extends ArrayBuffer[A0] {
     override def mapInPlace(f: A0 => A0): this.type = {
       var i = 1 // see "we do not use array(0)" comment below (???)
-      val siz = size
+      val siz = this.size
       while (i < siz) { this(i) = f(this(i)); i += 1 }
       this
     }
@@ -107,7 +106,8 @@ sealed class PriorityQueue[A](implicit val ord: Ordering[A])
   private def toA(x: AnyRef): A = x.asInstanceOf[A]
   protected def fixUp(as: Array[AnyRef], m: Int): Unit = {
     var k: Int = m
-    while (k > 1 && toA(as(k / 2)) < toA(as(k))) {
+    // use `ord` directly to avoid allocating `OrderingOps`
+    while (k > 1 && ord.lt(toA(as(k / 2)), toA(as(k)))) {
       resarr.p_swap(k, k / 2)
       k = k / 2
     }
@@ -118,9 +118,10 @@ sealed class PriorityQueue[A](implicit val ord: Ordering[A])
     var k: Int = m
     while (n >= 2 * k) {
       var j = 2 * k
-      if (j < n && toA(as(j)) < toA(as(j + 1)))
+      // use `ord` directly to avoid allocating `OrderingOps`
+      if (j < n && ord.lt(toA(as(j)), toA(as(j + 1))))
         j += 1
-      if (toA(as(k)) >= toA(as(j)))
+      if (ord.gteq(toA(as(k)), toA(as(j))))
         return k != m
       else {
         val h = as(k)
@@ -222,7 +223,7 @@ sealed class PriorityQueue[A](implicit val ord: Ordering[A])
   /** Returns the element with the highest priority in the queue,
     *  and removes this element from the queue.
     *
-    *  @throws java.util.NoSuchElementException
+    *  @throws NoSuchElementException
     *  @return   the element with the highest priority.
     */
   def dequeue(): A =
@@ -347,8 +348,6 @@ sealed class PriorityQueue[A](implicit val ord: Ordering[A])
     pq.resarr.p_size0 = n
     pq
   }
-
-  override def copyToArray[B >: A](xs: Array[B], start: Int): Int = copyToArray(xs, start, length)
 
   override def copyToArray[B >: A](xs: Array[B], start: Int, len: Int): Int = {
     val copied = IterableOnce.elemsToCopyToArray(length, xs.length, start, len)

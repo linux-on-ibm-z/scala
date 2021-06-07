@@ -12,7 +12,8 @@
 
 package scala.tools.testkit
 
-import org.junit.Assert, Assert._
+import org.junit.Assert.{assertEquals, assertFalse, assertTrue}
+
 import scala.reflect.ClassTag
 import scala.runtime.ScalaRunTime.stringOf
 import scala.collection.mutable
@@ -20,25 +21,35 @@ import scala.concurrent.{Await, Awaitable}
 import scala.util.chaining._
 import scala.util.{Failure, Success, Try}
 import scala.util.Properties.isJavaAtLeast
-import scala.util.control.NonFatal
+import scala.util.control.{ControlThrowable, NonFatal}
 import java.time.Duration
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 import java.lang.ref._
 import java.lang.reflect.{Array => _, _}
 import java.util.IdentityHashMap
+import scala.annotation.nowarn
 
 /** This module contains additional higher-level assert statements
  *  that are ultimately based on junit.Assert primitives.
+ *
+ *  Avoid adding methods, and above all *fields* (including `lazy val`s), that
+ *  require JVM-specific features such as run-time reflection. Otherwise, all
+ *  tests using this object stop working in Scala.js. Put such methods in
+ *  `ReflectUtil` instead. (`ClassTag`s are fine; they are supported in
+ *  Scala.js and Scala Native.)
  */
 object AssertUtil {
 
   /** Assert on Java 8, but on later versions, just print if assert would fail. */
   def assert8(b: => Boolean, msg: => Any) =
-    if (!isJavaAtLeast("9"))
+    if (!isJavaAtLeast(9))
       assert(b, msg)
     else if (!b)
       println(s"assert not $msg")
+
+  // junit fail is Unit
+  def fail(message: String): Nothing = throw new AssertionError(message)
 
   private final val timeout = 60 * 1000L                 // wait a minute
 
@@ -84,16 +95,17 @@ object AssertUtil {
    *  and that its message satisfies the `checkMessage` predicate.
    *  Any other exception is propagated.
    */
-  def assertThrows[T <: Throwable: ClassTag](body: => Any,
-      checkMessage: String => Boolean = s => true): Unit = {
+  def assertThrows[T <: Throwable: ClassTag](body: => Any, checkMessage: String => Boolean = _ => true): Unit =
     assertThrown[T](t => checkMessage(t.getMessage))(body)
-  }
+
+  private val Unthrown = new ControlThrowable {}
 
   def assertThrown[T <: Throwable: ClassTag](checker: T => Boolean)(body: => Any): Unit =
     try {
       body
-      fail("Expression did not throw!")
+      throw Unthrown
     } catch {
+      case Unthrown => fail("Expression did not throw!")
       case e: T if checker(e) => ()
       case failed: T =>
         val ae = new AssertionError(s"Exception failed check: $failed")
@@ -104,6 +116,8 @@ object AssertUtil {
         ae.addSuppressed(other)
         throw ae
     }
+
+  def assertFails[U](checkMessage: String => Boolean)(body: => U): Unit = assertThrows[AssertionError](body, checkMessage)
 
   /** JUnit-style assertion for `IterableLike.sameElements`.
    */
@@ -124,19 +138,26 @@ object AssertUtil {
     val wkref = new WeakReference(a)
     // fail if following strong references from root discovers referent. Quit if ref is empty.
     def assertNoRef(root: AnyRef): Unit = {
-      val seen = new IdentityHashMap[AnyRef, Unit]
-      def loop(o: AnyRef): Unit =
-        if (wkref.nonEmpty && o != null && !seen.containsKey(o)) {
+      val seen  = new IdentityHashMap[AnyRef, Unit]
+      val stack = mutable.Stack.empty[AnyRef]
+      def loop(): Unit = if (wkref.nonEmpty && stack.nonEmpty) {
+        val o: AnyRef = stack.pop()
+        if (o != null && !seen.containsKey(o)) {
           seen.put(o, ())
-          assertTrue(s"Root $root held reference $o", o ne wkref.get)
-          for {
-            f <- o.getClass.allFields
-            if !Modifier.isStatic(f.getModifiers)
-            if !f.getType.isPrimitive
-            if !classOf[Reference[_]].isAssignableFrom(f.getType)
-          } loop(f.follow(o))
+          assertFalse(s"Root $root held reference $o", o eq wkref.get)
+          o match {
+            case a: Array[AnyRef] =>
+              a.foreach(e => if (!e.isInstanceOf[Reference[_]]) stack.push(e))
+            case _ =>
+              for (f <- o.getClass.allFields)
+                if (!Modifier.isStatic(f.getModifiers) && !f.getType.isPrimitive && !classOf[Reference[_]].isAssignableFrom(f.getType))
+                  stack.push(f.follow(o))
+          }
         }
-      loop(root)
+        loop()
+      }
+      stack.push(root)
+      loop()
     }
     body
     roots.foreach(assertNoRef)
@@ -146,7 +167,7 @@ object AssertUtil {
   def assertZeroNetThreads(body: => Unit): Unit = {
     val group = new ThreadGroup("junit")
     try assertZeroNetThreads(group)(body)
-    finally group.destroy()
+    finally group.destroy(): @nowarn("cat=deprecation") // deprecated since JDK 16, will be removed
   }
   def assertZeroNetThreads[A](group: ThreadGroup)(body: => A): Try[A] = {
     val testDone = new CountDownLatch(1)
@@ -274,7 +295,7 @@ class NoTrace[A](body: => A) extends Runnable {
       case Success(a) => result = Some(a)
       case Failure(e) => synchronized { uncaught += ((Thread.currentThread, e)) }
     }
-    finally group.destroy()
+    finally group.destroy(): @nowarn("cat=deprecation") // deprecated since JDK 16, will be removed
   }
 
   private[testkit] lazy val errors: List[(Thread, Throwable)] = synchronized(uncaught.toList)
@@ -283,7 +304,7 @@ class NoTrace[A](body: => A) extends Runnable {
 
   private final val noError = None: Option[Throwable]
 
-  def asserted: Option[Throwable] = 
+  def asserted: Option[Throwable] =
     errors.collect { case (_, e: AssertionError) => e }
       .foldLeft(noError)((res, e) => res.map(suppress(_, e)).orElse(Some(e)))
 

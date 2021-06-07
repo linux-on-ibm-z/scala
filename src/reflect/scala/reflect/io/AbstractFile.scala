@@ -48,7 +48,7 @@ object AbstractFile {
    */
   def getDirectory(file: File): AbstractFile =
     if (file.isDirectory) new PlainFile(file)
-    else if (file.isFile && Path.isExtensionJarOrZip(file.jfile)) ZipArchive fromFile file
+    else if (file.isFile && Path.isExtensionJarOrZip(file.jfile)) ZipArchive.fromFile(file)
     else null
 
   /**
@@ -63,7 +63,7 @@ object AbstractFile {
       else getFile(f)
     } else null
 
-  def getResources(url: URL): AbstractFile = ZipArchive fromManifestURL url
+  def getResources(url: URL): AbstractFile = ZipArchive.fromManifestURL(url)
 }
 
 /**
@@ -121,7 +121,7 @@ abstract class AbstractFile extends AbstractIterable[AbstractFile] {
 
   /** Does this abstract file denote an existing file? */
   def exists: Boolean = {
-    //if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(IOStats.fileExistsCount)
+    //if (settings.areStatisticsEnabled) statistics.incCounter(IOStats.fileExistsCount)
     (file eq null) || file.exists
   }
 
@@ -193,6 +193,9 @@ abstract class AbstractFile extends AbstractIterable[AbstractFile] {
     }
   }
   def toByteBuffer: ByteBuffer = ByteBuffer.wrap(toByteArray)
+
+  /** Returns the context of this file (if applicable) in a byte array. This array might _not_ be defensively copied. */
+  def unsafeToByteArray: Array[Byte] = toByteArray
 
   /** Returns all abstract subfiles of this abstract directory. */
   def iterator: Iterator[AbstractFile]

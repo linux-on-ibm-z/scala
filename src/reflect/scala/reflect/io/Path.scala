@@ -36,9 +36,15 @@ import scala.util.Random.alphanumeric
  */
 object Path {
   def isExtensionJarOrZip(jfile: JFile): Boolean = isExtensionJarOrZip(jfile.getName)
-  def isExtensionJarOrZip(name: String): Boolean = {
-    name.endsWith(".jar") || name.endsWith(".zip")
-  }
+  def isExtensionJarOrZip(name: String): Boolean =
+    name.lastIndexOf('.') match {
+      case i if i >= 0 =>
+        val xt = name.substring(i + 1)
+        xt.equalsIgnoreCase("jar") || xt.equalsIgnoreCase("zip")
+      case _ => false
+    }
+
+  /** Lower case "extension", following the last dot. */
   def extension(name: String): String = {
     val i = name.lastIndexOf('.')
     if (i < 0) ""
@@ -58,12 +64,12 @@ object Path {
   def apply(path: String): Path = apply(new JFile(path))
   def apply(jfile: JFile): Path = try {
     def isFile = {
-      //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
+      //if (settings.areStatisticsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
       jfile.isFile
     }
 
     def isDirectory = {
-      //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
+      //if (settings.areStatisticsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
       jfile.isDirectory
     }
 
@@ -200,16 +206,16 @@ class Path private[io] (val jfile: JFile) {
   def canRead = jfile.canRead()
   def canWrite = jfile.canWrite()
   def exists = {
-    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileExistsCount)
+    //if (settings.areStatisticsEnabled) Statistics.incCounter(IOStats.fileExistsCount)
     try jfile.exists() catch { case ex: SecurityException => false }
   }
 
   def isFile = {
-    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
+    //if (settings.areStatisticsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
     try jfile.isFile() catch { case ex: SecurityException => false }
   }
   def isDirectory = {
-    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
+    //if (settings.areStatisticsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
     try jfile.isDirectory() catch { case ex: SecurityException => jfile.getPath == "." }
   }
   def isAbsolute = jfile.isAbsolute()

@@ -10,13 +10,13 @@ In 2014, you -- the Scala community -- matched the core team at EPFL in number o
 
 We are super happy about this, and are eager to make your experience contributing to Scala productive and satisfying, so that we can keep up this growth. We can't do this alone (nor do we want to)!
 
-This is why we're collecting these notes on how to contribute, and we hope you'll share your experience to improve the process for the next contributor! (Feel free to send a PR for this note, send your thoughts to scala/contributors (Gitter) or contributors.scala-lang.org (Discourse), or tweet about it to @adriaanm.)
+This is why we're collecting these notes on how to contribute, and we hope you'll share your experience to improve the process for the next contributor! (Feel free to send a PR for this note, send your thoughts to scala/contributors (Gitter) or contributors.scala-lang.org (Discourse).)
 
-By the way, the team at Lightbend is: @adriaanm, @lrytz, @retronym, @SethTisue, and @szeiger.
+By the way, the team at Lightbend is: @lrytz, @retronym, @SethTisue, and  @dwijnand.
 
 ## What kind of PR are you submitting?
 
-Regardless of the nature of your Pull Request, we have to ask you to digitally sign the [Scala CLA](http://www.lightbend.com/contribute/cla/scala), to protect the OSS nature of the code base.
+Regardless of the nature of your Pull Request, we have to ask you to digitally sign the [Scala CLA](https://www.lightbend.com/contribute/cla/scala), to protect the OSS nature of the code base.
 
 You don't need to submit separate PRs for 2.12.x and 2.13.x. Any change accepted on 2.12.x will, in time, be merged onto 2.13.x too. (We are no longer accepting PRs for 2.11.x.)
 
@@ -48,7 +48,7 @@ For longer-running development, likely required for this category of code contri
 
 Any language change (including bug fixes) must be accompanied by the relevant updates to the spec, which lives in the same repository for this reason.
 
-A new language feature or other substantial enough language change requires a SIP (Scala Improvement Process) proposal. For more details on submitting SIPs, see [how to submit a SIP](http://docs.scala-lang.org/sips/sip-submission.html).
+A new language feature or other substantial enough language change requires a SIP (Scala Improvement Process) proposal. For more details on submitting SIPs, see [how to submit a SIP](https://docs.scala-lang.org/sips/sip-submission.html).
 
 ## Guidelines
 
@@ -115,13 +115,30 @@ To run a single negative test from sbt shell:
 root> partest --verbose test/files/neg/delayed-init-ref.scala
 ```
 
-To specify compiler flags such as `-deprecation -Xlint -Xfatal-warnings`, you can add a comment
-at the top of your source file of the form: `// scalac: -deprecation -Xlint -Xfatal-warnings`.
+A test can be either a single `.scala` file or a directory containing multiple `.scala` and `.java` files.
+For testing separate compilation, files can be grouped using `_N` suffixes in the filename. For example, a test
+with files (`A.scala`, `B_1.scala`, `C_1.java`, `Test_2.scala`) does:
+```
+scalac         A.scala            -d out
+scalac -cp out B_1.scala C_1.java -d out
+javac  -cp out C_1.java           -d out
+scalac -cp out Test_2.scala       -d out
+scala  -cp out Test
+```
 
-To test that no warnings are emitted, use `-Xfatal-warnings`. That will fail a `pos` test if there
-are warnings. Note that `pos` tests do not have `.check` files.
+**Flags**
+  - To specify compiler flags such as `-Werror -Xlint`, you can add a comment at the top of your source file of the form: `// scalac: -Werror -Xlint`.
+  - Similarly, a `// javac: <flags>` comment in a Java source file passes flags to the Java compiler.
+  - A `// filter: <regex>` comment eliminates output lines that match the filter before comparing to the `.check` file.
+  - A `// java: <flags>` comment makes a `run` test execute in a separate JVM and passes the additional flags to the `java` command.
+  - A `// javaVersion <N[+| - M]>` comment makes partest skip the test if the java version is outside the requested range (e.g. `8`, `15+`, `9 - 11`)
 
-To test that warnings are correctly emitted, use `-Xfatal-warnings` with a `neg` test and `.check` file.
+**Common Usage**
+
+To test that no warnings are emitted while compiling a `pos` test, use `-Werror`.
+That will fail a `pos` test if there are warnings. Note that `pos` tests do not have `.check` files.
+
+To test that warnings are correctly emitted, use `-Werror` with a `neg` test and `.check` file.
 The usual way to create a `.check` file is `partest --update-check`.
 
 To run all tests in `neg` categories from sbt shell:
@@ -131,7 +148,9 @@ root> partest --neg
 ```
 
 This might take a couple of minutes to complete. But in a few minutes, you could test 1000+ negative examples,
-so it's totally worth your time if you are working on changing error messages for example.
+so it's totally worth your time, especially if you are working on changing error messages.
+If you have made a bunch of tests fail by tweaking a message, you can update them in bulk
+with `partest --update-check --failed`.
 
 Suppose you're interested in ranges. Here's how you can grep the partests and run them:
 
@@ -169,7 +188,7 @@ See `--help` for more info:
 root> partest --help
 ```
 
-Partests are compiled by the `quick` compiler (and `run` partests executed with the `quick` library),
+Partests are compiled by the bootstrapped `quick` compiler (and `run` partests executed with the `quick` library),
 and therefore:
 
 * if you're working on the compiler, you must write a partest, or a `BytecodeTesting` JUnit test which invokes the compiler programmatically; however
@@ -225,7 +244,7 @@ Follow the [Boy Scout Rule](https://martinfowler.com/bliki/OpportunisticRefactor
 * "Always leave the code behind in a better state than you found it"
 * This translates to using any opportunity possible to improve and clean up the code in front of you
 
-Please also have a look at the [Scala Hacker Guide](http://www.scala-lang.org/contribute/hacker-guide.html) by @xeno-by.
+Please also have a look at the [Scala Hacker Guide](https://www.scala-lang.org/contribute/hacker-guide.html) by @xeno-by.
 
 ### Clean commits, clean history
 
@@ -233,8 +252,8 @@ A pull request should consist of commits with messages that clearly state what p
 
 Commit logs should be stated in the active, present tense.
 
-A commit's subject should be 72 characters or less.  Overall, think of
-the first line of the commit as a description of the action performed
+The subject line of a commit message should be no more than 72 characters.
+Overall, think of the first line of the commit as a description of the action performed
 by the commit on the code base, so use the active voice and the
 present tense.  That also makes the commit subjects easy to reuse in
 release notes.
@@ -253,7 +272,7 @@ if this commit should not be merged forward into the next release
 branch.
 
 Here is standard advice on good commit messages:
-http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html
+https://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html
 
 ### Pass Scabot
 

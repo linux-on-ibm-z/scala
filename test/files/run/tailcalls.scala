@@ -251,6 +251,7 @@ class FancyTailCalls {
           def loop(n: Int): Int = if (n == 0) v else loop(n - 1)
           loop(x) == v
         } => true
+      case _ => throw new MatchError(x)
     }
 
   import FancyTailCalls._
@@ -294,7 +295,7 @@ object Test {
         print(" raised exception " + exception)
       }
     }
-    println
+    println()
   }
 
   def check_success_b(name: String, closure: => Boolean, expected: Boolean): Unit = {
@@ -311,7 +312,7 @@ object Test {
         Console.print(" raised exception " + exception);
       }
     }
-    println
+    println()
   }
 
   def check_overflow(name: String, closure: => Int): Unit = {
@@ -325,7 +326,7 @@ object Test {
         print(" raised exception " + exception)
       }
     }
-    println
+    println()
   }
 
   def calibrate: Int = {
@@ -361,7 +362,7 @@ object Test {
     check_success("SubClass .f", SubClass .f(max, max), max)
     check_success("Sealed   .f", Sealed   .f(max, max), 0)
     check_success("SubSealed.f", SubSealed.f(max, max), max)
-    println
+    println()
 
     // test tail calls in nested classes/objects
     val c: C = new C
@@ -395,7 +396,7 @@ object Test {
     check_success("c.c.O.c.f", c.c.O.c.f(max, max), 0)
     check_success("c.c.c.O.f", c.c.c.O.f(max, max), 0)
     check_success("c.c.c.c.f", c.c.c.c.f(max, max), 0)
-    println
+    println()
 
     // test tail calls with different signatures
     val TailCall = new TailCall("S")
@@ -406,7 +407,7 @@ object Test {
     check_success("TailCall.g2", TailCall.g2(max, max     ), 0)
     check_success("TailCall.g3", TailCall.g3(max, max, Nil), 0)
     check_success("TailCall.h1", TailCall.h1(max, max     ), 0)
-    println
+    println()
 
     val NonTailCall = new NonTailCall
     check_success("NonTailCall.f1", NonTailCall.f1(2), 0)

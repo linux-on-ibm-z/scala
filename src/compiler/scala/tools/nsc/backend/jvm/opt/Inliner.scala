@@ -412,15 +412,17 @@ abstract class Inliner {
                 case Some(inlinedCallsite) =>
                   val rw = inlinedCallsite.warning.get
                   if (rw.emitWarning(compilerSettings)) {
-                    backendReporting.inlinerWarning(
+                    backendReporting.optimizerWarning(
                       inlinedCallsite.eliminatedCallsite.callsitePosition,
-                      rw.toString + inlineChainSuffix(r.callsite, state.inlineChain(inlinedCallsite.eliminatedCallsite.callsiteInstruction, skipForwarders = true)))
+                      rw.toString + inlineChainSuffix(r.callsite, state.inlineChain(inlinedCallsite.eliminatedCallsite.callsiteInstruction, skipForwarders = true)),
+                      backendUtils.optimizerWarningSiteString(inlinedCallsite.eliminatedCallsite))
                   }
                 case _ =>
                   if (w.emitWarning(compilerSettings))
-                    backendReporting.inlinerWarning(
+                    backendReporting.optimizerWarning(
                       r.callsite.callsitePosition,
-                      w.toString + inlineChainSuffix(r.callsite, state.inlineChain(r.callsite.callsiteInstruction, skipForwarders = true)))
+                      w.toString + inlineChainSuffix(r.callsite, state.inlineChain(r.callsite.callsiteInstruction, skipForwarders = true)),
+                      backendUtils.optimizerWarningSiteString(r.callsite))
               }
           }
         }
@@ -456,7 +458,7 @@ abstract class Inliner {
             }
           case _ =>
         }
-        val newRequests = selectRequestsForMethodSize(method, rs.toList, mutable.Map.empty).sorted(inlineRequestOrdering)
+        val newRequests = selectRequestsForMethodSize(method, rs.toList.sorted(inlineRequestOrdering), mutable.Map.empty)
 
         state.illegalAccessInstructions.find(insn => newRequests.forall(_.callsite.callsiteInstruction != insn)) match {
           case None =>
@@ -471,7 +473,10 @@ abstract class Inliner {
                 val w = inlinedCallsite.warning.get
                 state.inlineLog.logRollback(callsite, s"Instruction ${AsmUtils.textify(notInlinedIllegalInsn)} would cause an IllegalAccessError, and is not selected for (or failed) inlining", state.outerCallsite(notInlinedIllegalInsn))
                 if (w.emitWarning(compilerSettings))
-                  backendReporting.inlinerWarning(callsite.callsitePosition, w.toString + inlineChainSuffix(callsite, state.inlineChain(callsite.callsiteInstruction, skipForwarders = true)))
+                  backendReporting.optimizerWarning(
+                    callsite.callsitePosition,
+                    w.toString + inlineChainSuffix(callsite, state.inlineChain(callsite.callsiteInstruction, skipForwarders = true)),
+                    backendUtils.optimizerWarningSiteString(callsite))
               case _ =>
                 // TODO: replace by dev warning after testing
                 assert(false, "should not happen")
@@ -523,7 +528,7 @@ abstract class Inliner {
     val elided = mutable.Set.empty[InlineRequest]
     def nonElidedRequests(methodNode: MethodNode): Set[InlineRequest] = requestsByMethod(methodNode) diff elided
 
-    /**
+    /*
      * Break cycles in the inline request graph by removing callsites.
      *
      * The list `requests` is traversed left-to-right, removing those callsites that are part of a
@@ -680,7 +685,7 @@ abstract class Inliner {
    */
   def inlineCallsite(callsite: Callsite, aliasFrame: Option[AliasingFrame[Value]] = None, updateCallGraph: Boolean = true): Map[AbstractInsnNode, AbstractInsnNode] = {
     import callsite._
-    val Right(callsiteCallee) = callsite.callee
+    val Right(callsiteCallee) = callsite.callee: @unchecked
     import callsiteCallee.{callee, calleeDeclarationClass, sourceFilePath}
 
     val isStatic = isStaticMethod(callee)
@@ -728,7 +733,7 @@ abstract class Inliner {
     var callsiteStackSlot = f.getLocals + f.getStackSize - calleeParamTypes.length - (if (isStatic) 0 else 1)
     // Counter for param slots of the callee (long / double use 2 slots)
     var calleeParamSlot = 0
-    var nextLocalIndex = callsiteMethod.maxLocals
+    var nextLocalIndex = BackendUtils.maxLocals(callsiteMethod)
 
     val numLocals = f.getLocals
 
@@ -753,10 +758,10 @@ abstract class Inliner {
       calleeParamSlot += paramSize
     }
 
-    val numSavedParamSlots = callsiteMethod.maxLocals + calleeFirstNonParamSlot - nextLocalIndex
+    val numSavedParamSlots = BackendUtils.maxLocals(callsiteMethod) + calleeFirstNonParamSlot - nextLocalIndex
 
     // local var indices in the callee are adjusted
-    val localVarShift = callsiteMethod.maxLocals - numSavedParamSlots
+    val localVarShift = BackendUtils.maxLocals(callsiteMethod) - numSavedParamSlots
     clonedInstructions.iterator.asScala foreach {
       case varInstruction: VarInsnNode =>
         if (varInstruction.`var` < calleeParamLocals.length)
@@ -773,7 +778,7 @@ abstract class Inliner {
     // add a STORE instruction for each expected argument, including for THIS instance if any
     val argStores = new InsnList
     val nullOutLocals = new InsnList
-    val numCallsiteLocals = callsiteMethod.maxLocals
+    val numCallsiteLocals = BackendUtils.maxLocals(callsiteMethod)
     calleeParamSlot = 0
     if (!isStatic) {
       def addNullCheck(): Unit = {
@@ -848,7 +853,7 @@ abstract class Inliner {
     val hasReturnValue = returnType.getSort != asm.Type.VOID
     // Use a fresh slot for the return value. We could re-use local variable slot of the inlined
     // code, but this makes some cleanups (in LocalOpt) fail / generate less clean code.
-    val returnValueIndex = callsiteMethod.maxLocals + callee.maxLocals - numSavedParamSlots
+    val returnValueIndex = BackendUtils.maxLocals(callsiteMethod) + BackendUtils.maxLocals(callee) - numSavedParamSlots
 
     def returnValueStore(returnInstruction: AbstractInsnNode) = {
       val opc = returnInstruction.getOpcode match {
@@ -925,11 +930,11 @@ abstract class Inliner {
     // an exception is thrown in the inlined code.
     callsiteMethod.tryCatchBlocks.addAll(0, cloneTryCatchBlockNodes(callee, labelsMap).asJava)
 
-    callsiteMethod.maxLocals += callee.maxLocals - numSavedParamSlots + returnType.getSize
+    callsiteMethod.maxLocals = BackendUtils.maxLocals(callsiteMethod) + BackendUtils.maxLocals(callee) - numSavedParamSlots + returnType.getSize
     val maxStackOfInlinedCode = {
       // One slot per value is correct for long / double, see comment in the `analysis` package object.
       val numStoredArgs = calleeParamTypes.length + (if (isStatic) 0 else 1)
-      callee.maxStack + callsiteStackHeight - numStoredArgs
+      BackendUtils.maxStack(callee) + callsiteStackHeight - numStoredArgs
     }
     val stackHeightAtNullCheck = {
       val stackSlotForNullCheck =
@@ -950,7 +955,7 @@ abstract class Inliner {
       callsiteStackHeight + stackSlotForNullCheck
     }
 
-    callsiteMethod.maxStack = math.max(callsiteMethod.maxStack, math.max(stackHeightAtNullCheck, maxStackOfInlinedCode))
+    callsiteMethod.maxStack = math.max(BackendUtils.maxStack(callsiteMethod), math.max(stackHeightAtNullCheck, maxStackOfInlinedCode))
 
     lazy val callsiteLambdaBodyMethods = onIndyLambdaImplMethod(callsiteClass.internalName)(_.getOrElseUpdate(callsiteMethod, mutable.Map.empty))
     onIndyLambdaImplMethodIfPresent(calleeDeclarationClass.internalName)(methods => methods.getOrElse(callee, Nil) foreach {
@@ -984,7 +989,7 @@ abstract class Inliner {
    */
   def earlyCanInlineCheck(callsite: Callsite): Option[CannotInlineWarning] = {
     import callsite.{callsiteClass, callsiteMethod}
-    val Right(callsiteCallee) = callsite.callee
+    val Right(callsiteCallee) = callsite.callee: @unchecked
     import callsiteCallee.{callee, calleeDeclarationClass}
 
     if (isSynchronizedMethod(callee)) {
@@ -1018,7 +1023,7 @@ abstract class Inliner {
    */
   def canInlineCallsite(callsite: Callsite): Option[CannotInlineWarning] = {
     import callsite.{callsiteClass, callsiteInstruction, callsiteMethod, callsiteStackHeight}
-    val Right(callsiteCallee) = callsite.callee
+    val Right(callsiteCallee) = callsite.callee: @unchecked
     import callsiteCallee.{callee, calleeDeclarationClass}
 
     def calleeDesc = s"${callee.name} of type ${callee.desc} in ${calleeDeclarationClass.internalName}"
@@ -1168,7 +1173,7 @@ abstract class Inliner {
    *     error occurred
    */
   def findIllegalAccess(instructions: InsnList, calleeDeclarationClass: ClassBType, destinationClass: ClassBType): Either[(AbstractInsnNode, OptimizerWarning), List[AbstractInsnNode]] = {
-    /**
+    /*
      * Check if `instruction` can be transplanted to `destinationClass`.
      *
      * If the instruction references a class, method or field that cannot be found in the
@@ -1272,10 +1277,10 @@ abstract class Inliner {
         //    - the receiver is the target of the CallSite
         //    - the other argument values are those that were on the operand stack at the indy instruction (indyLambda: the captured values)
         //
-        // [1] http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.4.10
-        // [2] http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.23
-        // [3] http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.5.invokedynamic
-        // [4] http://docs.oracle.com/javase/specs/jvms/se8/html/jvms-5.html#jvms-5.4.3
+        // [1] https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.4.10
+        // [2] https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.23
+        // [3] https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.5.invokedynamic
+        // [4] https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-5.html#jvms-5.4.3
 
         // We cannot generically check if an `invokedynamic` instruction can be safely inlined into
         // a different class, that depends on the bootstrap method. The Lookup object passed to the

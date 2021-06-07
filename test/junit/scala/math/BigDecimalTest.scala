@@ -1,13 +1,9 @@
 package scala.math
 
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 import org.junit.Test
 import java.math.{BigDecimal => BD, MathContext => MC}
-import java.util.Formatter.BigDecimalLayoutForm
 
 /* Tests various maps by making sure they all agree on the same answers. */
-@RunWith(classOf[JUnit4])
 class BigDecimalTest {
   
   // Motivated by scala/bug#6173: BigDecimal#isWhole implementation is very heap intensive
@@ -122,7 +118,7 @@ class BigDecimalTest {
   def consistentRoundingTest(): Unit = {
     val mc6 = new MC(6)
     val sameRounding = List(
-      List(
+      List[Any](
         123457000,
         123457000L,
         123457e3,
@@ -137,7 +133,7 @@ class BigDecimalTest {
         BigDecimal.decimal(123456789d, mc6),
         BigDecimal.decimal(new BD("123456789"), mc6)
       ),
-      List(
+      List[Any](
         123456789,
         123456789L,
         123456789d,
@@ -181,7 +177,7 @@ class BigDecimalTest {
   def churnRepresentationTest(): Unit = {
     val rn = new scala.util.Random(42)
     for (i <- 1 to 1000) {
-      val d = rn.nextDouble
+      val d = rn.nextDouble()
       assert({
         BigDecimal.decimal(d).isDecimalDouble &&
         BigDecimal.binary(d).isBinaryDouble &&
@@ -189,7 +185,7 @@ class BigDecimalTest {
       }, s"At least one wrong BigDecimal representation for $d")
     }
     for (i <- 1 to 1000) {
-      val f = rn.nextFloat
+      val f = rn.nextFloat()
       assert({
         BigDecimal.decimal(f).isDecimalFloat &&
         BigDecimal.binary(f).isBinaryFloat &&
@@ -310,5 +306,14 @@ class BigDecimalTest {
     assert(prod == BigDecimal("9000000000000000000000001.810000000000000000000000091", MC.UNLIMITED))
 
     assert(bds.product == prod)
+  }
+
+  @Test
+  def testImplicitBigDecimalConversionJavaToScalaHandlesNull(): Unit = {
+    val bdNull: BigDecimal = (null: java.math.BigDecimal): BigDecimal
+    assert(bdNull == null)
+
+    val bdValue: BigDecimal = (BD.ONE: java.math.BigDecimal): BigDecimal
+    assert(bdValue.bigDecimal == BD.ONE)
   }
 }

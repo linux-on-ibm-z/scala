@@ -8,9 +8,6 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
 
   type K = Int
 
-  override def overrideParameters(p: org.scalacheck.Test.Parameters) =
-    p.withMinSuccessfulTests(100).withInitialSeed(42L)
-
   private def doSubtract(one: HashSet[K], two: HashSet[K]) = {
     one.foldLeft(HashSet.empty[K])((result, elem) => if (two contains elem) result else result + elem)
   }
@@ -41,7 +38,7 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
     val builder = HashSet.newBuilder[K]
     inputSet.foreach(builder.addOne)
 
-    val duplicateSet = builder.result
+    val duplicateSet = builder.result()
     inputSet == duplicateSet
   }
 
@@ -67,7 +64,7 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
     val builder = HashSet.newBuilder[K]
     inputShared.foreach(builder.addOne)
 
-    val duplicateSet = builder.result
+    val duplicateSet = builder.result()
     inputShared == inputShared.intersect(duplicateSet)
   }
 
@@ -124,7 +121,7 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
     val builder = HashSet.newBuilder[K]
     inputShared.foreach(builder.addOne)
 
-    val duplicateSet = builder.result
+    val duplicateSet = builder.result()
     inputShared == inputShared.union(duplicateSet)
   }
 
@@ -169,7 +166,7 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
     val builder = HashSet.newBuilder[K]
     inputShared.foreach(builder.addOne)
 
-    val duplicateSet = builder.result
+    val duplicateSet = builder.result()
     HashSet.empty[K] == inputShared.diff(duplicateSet)
   }
 
@@ -243,7 +240,7 @@ object ImmutableChampHashSetProperties extends Properties("immutable.HashSet") {
   }
   property("adding elems twice to builder is the same as adding them once") = forAll { seq: Seq[K] =>
     val b = HashSet.newBuilder[K].addAll(seq)
-    b.result == b.addAll(seq).result()
+    b.result() == b.addAll(seq).result()
   }
   property("(xs ++ ys).toSet == xs.toSet ++ ys.toSet") = forAll { (xs: Seq[K],ys: Seq[K]) =>
     (xs ++ ys).toSet =? xs.toSet ++ ys.toSet

@@ -51,7 +51,7 @@ package api
  *  ''Note:'' Method `typeOf` does not work for types with type parameters, such as `typeOf[List[A]]` where `A` is
  *  a type parameter. In this case, use [[scala.reflect.api.TypeTags#weakTypeOf]] instead.
  *
- *  For other ways to instantiate types, see the [[http://docs.scala-lang.org/overviews/reflection/symbols-trees-types.html corresponding section of the Reflection Guide]].
+ *  For other ways to instantiate types, see the [[https://docs.scala-lang.org/overviews/reflection/symbols-trees-types.html corresponding section of the Reflection Guide]].
  *
  *  === Common Operations on Types ===
  *
@@ -69,7 +69,7 @@ package api
  *     res1: reflect.runtime.universe.Symbol = method map
  *  }}}
  *
- * For more information about `Type`s, see the [[http://docs.scala-lang.org/overviews/reflection/symbols-trees-types.html Reflection Guide: Symbols, Trees, and Types]]
+ * For more information about `Type`s, see the [[https://docs.scala-lang.org/overviews/reflection/symbols-trees-types.html Reflection Guide: Symbols, Trees, and Types]]
  *
  *  @groupname TypeCreators Types - Creation
  *  @groupname TypeOps      Types - Operations
@@ -137,7 +137,7 @@ trait Types {
      *  Unlike `members` this method doesn't returns inherited members.
      *
      *  Members in the returned scope might appear in arbitrary order.
-     *  Use `declarations.sorted` to get an ordered list of members.
+     *  Use `decls.sorted` to get an ordered list of members.
      */
     def decls: MemberScope
 
@@ -150,7 +150,7 @@ trait Types {
      *  Unlike `declarations` this method also returns inherited members.
      *
      *  Members in the returned scope might appear in arbitrary order.
-     *  Use `declarations.sorted` to get an ordered list of members.
+     *  Use `members.sorted` to get an ordered list of members.
      */
     def members: MemberScope
 
@@ -307,7 +307,7 @@ trait Types {
      *
      *  {{{
      *  scala> class C { def foo[T](x: T)(y: T) = ??? }
-     *  defined class C
+     *  class C
      *
      *  scala> typeOf[C].member(TermName("foo")).asMethod
      *  res0: reflect.runtime.universe.MethodSymbol = method foo
@@ -337,10 +337,10 @@ trait Types {
      *
      *  {{{
      *  scala> class C {
-     *       | def foo[T](x: T)(y: T) = ???
-     *       | def bar: Int = ???
+     *       |   def foo[T](x: T)(y: T) = ???
+     *       |   def bar: Int = ???
      *       | }
-     *  defined class C
+     *  class C
      *
      *  scala> typeOf[C].member(TermName("foo")).asMethod
      *  res0: reflect.runtime.universe.MethodSymbol = method foo
@@ -363,7 +363,7 @@ trait Types {
      *  scala> typeOf[C].member(TermName("bar")).asMethod
      *  res6: reflect.runtime.universe.MethodSymbol = method bar
      *
-     *  scala> res6.info
+     *  scala> res6.info // vanilla NullaryMethodType
      *  res7: reflect.runtime.universe.Type = => scala.Int
      *
      *  scala> res6.info.resultType

@@ -18,60 +18,53 @@ import scala.reflect.internal.SymbolTable
 import scala.reflect.internal.settings.MutableSettings
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
+import scala.annotation.nowarn
 import scala.runtime.LongRef
 
 abstract class Statistics(val symbolTable: SymbolTable, settings: MutableSettings) {
-
-  initFromSettings(settings)
-
-  def initFromSettings(currentSettings: MutableSettings): Unit = {
-    enabled = currentSettings.YstatisticsEnabled
-    hotEnabled = currentSettings.YhotStatisticsEnabled
-  }
-
   type TimerSnapshot = (Long, Long)
 
   /** If enabled, increment counter by one */
   @inline final def incCounter(c: Counter): Unit = {
-    if (areStatisticsLocallyEnabled && c != null) c.value += 1
+    if (enabled && c != null) c.value += 1
   }
 
   /** If enabled, increment counter by given delta */
   @inline final def incCounter(c: Counter, delta: Int): Unit = {
-    if (areStatisticsLocallyEnabled && c != null) c.value += delta
+    if (enabled && c != null) c.value += delta
   }
 
   /** If enabled, increment counter in map `ctrs` at index `key` by one */
   @inline final def incCounter[K](ctrs: QuantMap[K, Counter], key: K) =
-    if (areStatisticsLocallyEnabled && ctrs != null) ctrs(key).value += 1
+    if (enabled && ctrs != null) ctrs(key).value += 1
 
   /** If enabled, start subcounter. While active it will track all increments of
    *  its base counter.
    */
   @inline final def startCounter(sc: SubCounter): (Int, Int) =
-    if (areStatisticsLocallyEnabled && sc != null) sc.start() else null
+    if (enabled && sc != null) sc.start() else null
 
   /** If enabled, stop subcounter from tracking its base counter. */
   @inline final def stopCounter(sc: SubCounter, start: (Int, Int)): Unit = {
-    if (areStatisticsLocallyEnabled && sc != null) sc.stop(start)
+    if (enabled && sc != null) sc.stop(start)
   }
 
   /** If enabled, start timer */
   @inline final def startTimer(tm: Timer): TimerSnapshot =
-    if (areStatisticsLocallyEnabled && tm != null) tm.start() else null
+    if (enabled && tm != null) tm.start() else null
 
   /** If enabled, stop timer */
   @inline final def stopTimer(tm: Timer, start: TimerSnapshot): Unit = {
-    if (areStatisticsLocallyEnabled && tm != null) tm.stop(start)
+    if (enabled && tm != null) tm.stop(start)
   }
 
   /** If enabled, push and start a new timer in timer stack */
   @inline final def pushTimer(timers: TimerStack, timer: => StackableTimer): TimerSnapshot =
-    if (areStatisticsLocallyEnabled && timers != null) timers.push(timer) else null
+    if (enabled && timers != null) timers.push(timer) else null
 
   /** If enabled, stop and pop timer from timer stack */
   @inline final def popTimer(timers: TimerStack, prev: TimerSnapshot): Unit = {
-    if (areStatisticsLocallyEnabled && timers != null) timers.pop(prev)
+    if (enabled && timers != null) timers.pop(prev)
   }
 
   /** Create a new counter that shows as `prefix` and is active in given phases */
@@ -237,9 +230,12 @@ quant)
     override def toString = s"${super.toString} aggregate, ${show(specificNanos)} specific"
   }
 
+  // FIXME: Redesign `QuantMap` so that it no longer extends `HashMap` (probably
+  //        using composition), then remove the `@nowarn` annotation
   /** A mutable map quantity where missing elements are automatically inserted
    *  on access by executing `initValue`.
    */
+  @nowarn("""cat=deprecation&origin=scala\.collection\.mutable\.HashMap""")
   class QuantMap[K, V](val prefix: String, val phases: Seq[String], initValue: => V)(implicit ev: V => Ordered[V])
       extends mutable.HashMap[K, V] with Quantity {
     override def default(key: K) = {
@@ -290,29 +286,8 @@ quant)
   }
 
   private[this] val qs = new mutable.HashMap[String, Quantity]
-  private[scala] var areColdStatsLocallyEnabled: Boolean = false
-  private[scala] var areHotStatsLocallyEnabled: Boolean = false
 
-  /** Represents whether normal statistics can or cannot be enabled. */
-  @inline final def enabled: Boolean = areColdStatsLocallyEnabled
-  def enabled_=(cond: Boolean) = {
-    if (cond && !enabled) {
-      StatisticsStatics.enableColdStats()
-      areColdStatsLocallyEnabled = true
-    }
-  }
-
-  /** Represents whether hot statistics can or cannot be enabled. */
-  @inline final def hotEnabled: Boolean = enabled && areHotStatsLocallyEnabled
-  def hotEnabled_=(cond: Boolean) = {
-    if (cond && enabled && !areHotStatsLocallyEnabled) {
-      StatisticsStatics.enableHotStats()
-      areHotStatsLocallyEnabled = true
-    }
-  }
-
-  /** Tells whether statistics should be definitely reported to the user for this `Global` instance. */
-  @inline final def areStatisticsLocallyEnabled: Boolean = areColdStatsLocallyEnabled
+  @inline final def enabled: Boolean = settings.areStatisticsEnabled
 
   import scala.reflect.internal.Reporter
   /** Reports the overhead of measuring statistics via the nanoseconds variation. */

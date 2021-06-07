@@ -12,8 +12,6 @@
 
 package scala.tools.nsc
 
-import java.nio.file.Files
-
 /** A class representing command line info for scalac */
 class CompilerCommand(arguments: List[String], val settings: Settings) {
   def this(arguments: List[String], error: String => Unit) = this(arguments, new Settings(error))
@@ -35,7 +33,7 @@ class CompilerCommand(arguments: List[String], val settings: Settings) {
 
   private def explainAdvanced = """
     |-- Note --
-    |Boolean settings are false unless set: -Xdev -Xcheck-init:true -Xprompt:false
+    |Boolean settings generally are false unless set: -Xdev -Xcheck-init:true -Xprompt:false
     |Multi-valued settings are comma-separated: -Xlint:infer-any,unused,-missing-interpolator
     |Phases are a list of names, ids, or ranges of ids: -Vprint:parser,typer,5-10 -Ylog:-4
     |Use _ to enable all: -language:_ -Vprint:_
@@ -115,7 +113,7 @@ class CompilerCommand(arguments: List[String], val settings: Settings) {
     else if (Yhelp)         yusageMsg
     else if (showPlugins)   global.pluginDescriptions
     else if (showPhases)    global.phaseDescriptions + (
-      if (debug) "\n" + global.phaseFlagDescriptions else ""
+      if (settings.isDebug) "\n" + global.phaseFlagDescriptions else ""
     )
     else if (genPhaseGraph.isSetByUser) {
       val components = global.phaseNames // global.phaseDescriptors // one initializes
@@ -124,18 +122,15 @@ class CompilerCommand(arguments: List[String], val settings: Settings) {
     else allSettings.valuesIterator.filter(_.isHelping).map(_.help).mkString("\n\n")
   }
 
-  /**
-   * Expands all arguments starting with @ to the contents of the
-   * file named like each argument.
-   */
+  /** Expands all arguments starting with @ to the contents of the file named like each argument. */
   def expandArg(arg: String): List[String] = {
-    def stripComment(s: String) = s takeWhile (_ != '#')
-    import java.nio.file._
+    import java.nio.file.{Files, Paths}
     import scala.jdk.CollectionConverters._
+    def stripComment(s: String) = s.takeWhile(_ != '#')
     val file = Paths.get(arg stripPrefix "@")
     if (!Files.exists(file))
-      throw new java.io.FileNotFoundException("argument file %s could not be found" format file)
-    settings splitParams (Files.readAllLines(file).asScala map stripComment mkString " ")
+      throw new java.io.FileNotFoundException(s"argument file $file could not be found")
+    settings.splitParams(Files.readAllLines(file).asScala.map(stripComment).mkString(" "))
   }
 
   // override this if you don't want arguments processed here

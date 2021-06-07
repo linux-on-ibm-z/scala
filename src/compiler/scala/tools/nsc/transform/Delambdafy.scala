@@ -62,7 +62,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
     def apply(unit: global.CompilationUnit): Unit = ()
   }
 
-  protected def newTransformer(unit: CompilationUnit): Transformer =
+  protected def newTransformer(unit: CompilationUnit): AstTransformer =
     new DelambdafyTransformer(unit)
 
   class DelambdafyTransformer(unit: CompilationUnit) extends TypingTransformer(unit) {
@@ -159,20 +159,20 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
       val samParamTypes = exitingErasure(sam.info.paramTypes)
       val samResultType = exitingErasure(sam.info.resultType)
 
-      /** How to satisfy the linking invariants of https://docs.oracle.com/javase/8/docs/api/java/lang/invoke/LambdaMetafactory.html
-        *
-        * Given samMethodType: (U1..Un)Ru and function type T1,..., Tn => Rt (the target method created by uncurry)
-        *
-        * Do we need a bridge, or can we use the original lambda target for implMethod: (<captured args> A1..An)Ra
-        * (We can ignore capture here.)
-        *
-        * If, for i=1..N:
-        *  Ai =:= Ui || (Ai <:< Ui <:< AnyRef)
-        *  Ru =:= void || (Ra =:= Ru || (Ra <:< AnyRef, Ru <:< AnyRef))
-        *
-        * We can use the target method as-is -- if not, we create a bridging one that uses the types closest
-        * to the target method that still meet the above requirements.
-        */
+      /* How to satisfy the linking invariants of https://docs.oracle.com/javase/8/docs/api/java/lang/invoke/LambdaMetafactory.html
+       *
+       * Given samMethodType: (U1..Un)Ru and function type T1,..., Tn => Rt (the target method created by uncurry)
+       *
+       * Do we need a bridge, or can we use the original lambda target for implMethod: (<captured args> A1..An)Ra
+       * (We can ignore capture here.)
+       *
+       * If, for i=1..N:
+       *  Ai =:= Ui || (Ai <:< Ui <:< AnyRef)
+       *  Ru =:= void || (Ra =:= Ru || (Ra <:< AnyRef, Ru <:< AnyRef))
+       *
+       * We can use the target method as-is -- if not, we create a bridging one that uses the types closest
+       * to the target method that still meet the above requirements.
+       */
       val resTpOk = (
            samResultType =:= UnitTpe
         || functionResultType =:= samResultType
@@ -195,12 +195,12 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
 
         val bridgeParamTypes = map2(samParamTypes, functionParamTypes){ (samParamTp, funParamTp) =>
           if (isReferenceType(samParamTp) && funParamTp <:< samParamTp) funParamTp
-          else samParamTp
+          else postErasure.elimErasedValueType(samParamTp)
         }
 
         val bridgeResultType =
           if (resTpOk && isReferenceType(samResultType) && functionResultType <:< samResultType) functionResultType
-          else samResultType
+          else postErasure.elimErasedValueType(samResultType)
 
         val typeAdapter = new TypeAdapter { def typedPos(pos: Position)(tree: Tree): Tree = localTyper.typedPos(pos)(tree) }
         import typeAdapter.{adaptToType, unboxValueClass}
@@ -303,7 +303,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
         }
         try {
           // during this call boxingBridgeMethods will be populated from the Function case
-          val Template(parents, self, body) = super.transform(deriveTemplate(tree)(_.mapConserve(pretransform)))
+          val Template(parents, self, body) = super.transform(deriveTemplate(tree)(_.mapConserve(pretransform))): @unchecked
           Template(parents, self, body ++ boxingBridgeMethods)
         } finally boxingBridgeMethods.clear()
       case dd: DefDef if dd.symbol.isLiftedMethod && !dd.symbol.isDelambdafyTarget =>

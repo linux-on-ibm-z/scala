@@ -7,6 +7,7 @@ import scala.collection.mutable.Buffer
 import scala.reflect.ClassTag
 
 // based on run/collections-conversion.scala partest
+@deprecated("Tests conversion to Stream", since="2.13")
 class CollectionConversionsTest {
   val out = new StringBuilder
 
@@ -16,7 +17,7 @@ class CollectionConversionsTest {
   val testStream = Stream(1,2,3)
   val testArray = Array(1,2,3)
 
-  @Test def testAll: Unit = {
+  @Test def testAll(): Unit = {
     testConversion("iterator", () => (1 to 3).iterator)
     testConversion("Vector", () => Vector(1,2,3))
     testConversion("List", () => List(1,2,3))
@@ -61,6 +62,18 @@ class CollectionConversionsTest {
       print(out)
       fail("Not all tests successful")
     }
+  }
+
+  @Test
+  def t11976(): Unit = {
+    import scala.jdk.CollectionConverters._
+    val myMap_1 = java.util.Collections.singletonMap("a", 1)
+    var x = 0
+    myMap_1.asScala.partition { case (key, value) =>
+      x += 1
+      true
+    }
+    assertEquals(1, x)
   }
 }
 

@@ -8,8 +8,6 @@ import scala.collection.Hashing
 
 object ImmutableChampHashMapProperties extends Properties("HashMap") {
 
-  override def overrideParameters(p: Test.Parameters): Test.Parameters = p.withInitialSeed(42L)
-
   type K = Int
   type V = Int
   type T = (K, V)
@@ -35,7 +33,7 @@ object ImmutableChampHashMapProperties extends Properties("HashMap") {
     val builder = HashMap.newBuilder[K, V]
     inputMap.foreach(builder.addOne)
 
-    val duplicateMap = builder.result
+    val duplicateMap = builder.result()
     inputMap == duplicateMap
   }
 
@@ -74,7 +72,7 @@ object ImmutableChampHashMapProperties extends Properties("HashMap") {
 
   property("adding elems twice to builder is the same as adding them once") = forAll { seq: Seq[(K, V)] =>
     val b = HashMap.newBuilder[K, V].addAll(seq)
-    b.result == b.addAll(seq).result()
+    b.result() == b.addAll(seq).result()
   }
 
   property("(xs ++ ys).toMap == xs.toMap ++ ys.toMap") = forAll { (xs: Seq[(K, V)],ys: Seq[(K, V)]) =>

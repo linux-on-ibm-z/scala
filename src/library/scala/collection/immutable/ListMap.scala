@@ -107,6 +107,7 @@ sealed class ListMap[K, +V]
   private[immutable] def value: V = throw new NoSuchElementException("value of empty map")
   private[immutable] def next: ListMap[K, V] = throw new NoSuchElementException("next of empty map")
 
+  override def foldRight[Z](z: Z)(op: ((K, V), Z) => Z): Z = ListMap.foldRightInternal(this, z, op)
   override protected[this] def className = "ListMap"
 
 }
@@ -118,7 +119,7 @@ sealed class ListMap[K, +V]
   * n elements will take O(n^2^) time. This makes the builder suitable only for a small number of
   * elements.
   *
-  * @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#list-maps "Scala's Collection Library overview"]]
+  * @see [[https://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#list-maps "Scala's Collection Library overview"]]
   * section on `List Maps` for more information.
   * @define Coll ListMap
   * @define coll list map
@@ -272,6 +273,11 @@ object ListMap extends MapFactory[ListMap] {
     * @tparam V the map value type
     */
   def newBuilder[K, V]: ReusableBuilder[(K, V), ListMap[K, V]] = new ListMapBuilder[K, V]
+
+  @tailrec private def foldRightInternal[K, V, Z](map: ListMap[K, V], prevValue: Z, op: ((K, V), Z) => Z): Z = {
+    if (map.isEmpty) prevValue
+    else foldRightInternal(map.init, op(map.last, prevValue), op)
+  }
 }
 
 /** Builder for ListMap.

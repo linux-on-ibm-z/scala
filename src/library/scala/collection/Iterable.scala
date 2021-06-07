@@ -602,7 +602,7 @@ trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] with Iterable
 
   /**
     * Partitions this $coll into a map according to a discriminator function `key`. All the values that
-    * have the same discriminator are then transformed by the `value` function and then reduced into a
+    * have the same discriminator are then transformed by the `f` function and then reduced into a
     * single value with the `reduce` function.
     *
     * It is equivalent to `groupBy(key).mapValues(_.map(f).reduce(reduce))`, but more efficient.
@@ -672,8 +672,7 @@ trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] with Iterable
 
   def flatMap[B](f: A => IterableOnce[B]): CC[B] = iterableFactory.from(new View.FlatMap(this, f))
 
-  def flatten[B](implicit asIterable: A => IterableOnce[B]): CC[B] =
-    iterableFactory.from(new View.FlatMap(this, asIterable))
+  def flatten[B](implicit asIterable: A => IterableOnce[B]): CC[B] = flatMap(asIterable)
 
   def collect[B](pf: PartialFunction[A, B]): CC[B] =
     iterableFactory.from(new View.Collect(this, pf))
@@ -994,7 +993,7 @@ trait MapFactoryDefaults[K, +V,
   override protected def fromSpecific(coll: IterableOnce[(K, V @uncheckedVariance)]): CC[K, V @uncheckedVariance] = mapFactory.from(coll)
   override protected def newSpecificBuilder: mutable.Builder[(K, V @uncheckedVariance), CC[K, V @uncheckedVariance]] = mapFactory.newBuilder[K, V]
   override def empty: CC[K, V @uncheckedVariance] = (this: AnyRef) match {
-    // Implemented here instead of in TreeSeqMap since overriding empty in TreeSeqMap is not forwards compatible (should be moved for 2.14)
+    // Implemented here instead of in TreeSeqMap since overriding empty in TreeSeqMap is not forwards compatible (should be moved)
     case self: immutable.TreeSeqMap[K, V] => immutable.TreeSeqMap.empty(self.orderedBy).asInstanceOf[CC[K, V]]
     case _ => mapFactory.empty
   }

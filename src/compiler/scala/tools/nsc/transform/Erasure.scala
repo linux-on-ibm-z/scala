@@ -15,7 +15,7 @@ package transform
 
 import scala.annotation.tailrec
 import scala.reflect.internal.ClassfileConstants._
-import scala.collection.{ mutable, immutable }
+import scala.collection.{immutable, mutable}
 import symtab._
 import Flags._
 import scala.reflect.internal.Mode._
@@ -35,7 +35,7 @@ abstract class Erasure extends InfoTransform
 
   val requiredDirectInterfaces = perRunCaches.newAnyRefMap[Symbol, mutable.Set[Symbol]]()
 
-  def newTransformer(unit: CompilationUnit): Transformer =
+  def newTransformer(unit: CompilationUnit): AstTransformer =
     new ErasureTransformer(unit)
 
   override def keepsTypeParams = false
@@ -94,7 +94,7 @@ abstract class Erasure extends InfoTransform
       if (! ts.isEmpty && ! result) { apply(ts.head) ; untilApply(ts.tail) }
   }
 
-  override protected def verifyJavaErasure = settings.Xverify || settings.debug
+  override protected def verifyJavaErasure = settings.Xverify || settings.isDebug
   private def needsJavaSig(sym: Symbol, tp: Type, throwsArgs: List[Type]) = !settings.Ynogenericsig && {
     def needs(tp: Type) = NeedsSigCollector(sym.isClassConstructor).collect(tp)
     needs(tp) || throwsArgs.exists(needs)
@@ -243,7 +243,7 @@ abstract class Erasure extends InfoTransform
     }
     def boxedSig(tp: Type): Unit = jsig(tp, unboxedVCs = false)
     def boundsSig(bounds: List[Type]): Unit = {
-      val (isTrait, isClass) = bounds partition (_.typeSymbol.isTrait)
+      val (isTrait, isClass) = partitionConserve(bounds)(_.typeSymbol.isTrait)
       isClass match {
         case Nil    => builder.append(':') // + boxedSig(ObjectTpe)
         case x :: _ => builder.append(':'); boxedSig(x)
@@ -359,10 +359,10 @@ abstract class Erasure extends InfoTransform
             if (unboxedVCs) {
               val unboxedSeen = (tp memberType sym.derivedValueClassUnbox).finalResultType
               jsig(unboxedSeen, existentiallyBound, toplevel, unboxedVCs = true)
-            } else classSig
+            } else classSig()
           }
           else if (sym.isClass)
-            classSig
+            classSig()
           else
             jsig(erasure(sym0)(tp), existentiallyBound, toplevel, unboxedVCs)
         case PolyType(tparams, restpe) =>
@@ -446,8 +446,10 @@ abstract class Erasure extends InfoTransform
 
       case Block(stats, expr) =>
         // needs `hasSymbolField` check because `supercall` could be a block (named / default args)
-        val (presuper, supercall :: rest) = stats span (t => t.hasSymbolWhich(_ hasFlag PRESUPER))
+        val (presuper, supercall :: rest) = stats span (t => t.hasSymbolWhich(_ hasFlag PRESUPER)): @unchecked
         treeCopy.Block(tree, presuper ::: (supercall :: mixinConstructorCalls ::: rest), expr)
+
+      case x => throw new MatchError(x)
     }
   }
 
@@ -516,7 +518,7 @@ abstract class Erasure extends InfoTransform
         clashErrors += Tuple2(pos, msg)
       }
       for (bc <- root.baseClasses) {
-        if (settings.debug)
+        if (settings.isDebug)
           exitingPostErasure(println(
             sm"""check bridge overrides in $bc
                 |${bc.info.nonPrivateDecl(bridge.name)}
@@ -650,7 +652,7 @@ abstract class Erasure extends InfoTransform
       val rhs = member.tpe match {
         case MethodType(Nil, FoldableConstantType(c)) => Literal(c)
         case _                                =>
-          val sel: Tree    = Select(This(root), member)
+          val sel: Tree    = gen.mkAttributedSelect(gen.mkAttributedThis(root), member)
           val bridgingCall = bridge.paramss.foldLeft(sel)((fun, vparams) => Apply(fun, vparams map Ident))
 
           maybeWrap(bridgingCall)
@@ -855,8 +857,8 @@ abstract class Erasure extends InfoTransform
   }
 
   /** The erasure transformer */
-  class ErasureTransformer(unit: CompilationUnit) extends Transformer {
-    import overridingPairs.Cursor
+  class ErasureTransformer(unit: CompilationUnit) extends AstTransformer {
+    import overridingPairs.PairsCursor
 
     private def doubleDefError(pair: SymbolPair): Unit = {
       import pair._
@@ -913,7 +915,7 @@ abstract class Erasure extends InfoTransform
       }
     }
 
-    private class DoubleDefsCursor(root: Symbol) extends Cursor(root) {
+    private class DoubleDefsCursor(root: Symbol) extends PairsCursor(root) {
       // specialized members have no type history before 'specialize', causing double def errors for curried defs
       override def exclude(sym: Symbol): Boolean = (
            sym.isType
@@ -1015,8 +1017,9 @@ abstract class Erasure extends InfoTransform
         val args = tree.args
 
         def qualifier = fn match {
-          case Select(qual, _) => qual
+          case Select(qual, _)               => qual
           case TypeApply(Select(qual, _), _) => qual
+          case x                             => throw new MatchError(x)
         }
 
         // TODO: this should share logic with TypeTestTreeMaker in the pattern matcher,
@@ -1164,14 +1167,13 @@ abstract class Erasure extends InfoTransform
                 }
 
                 qual.tpe.typeSymbol match {
-                  case UnitClass | NullClass                    => LIT(0)
-                  case IntClass                                 => qual
-                  case s @ (ShortClass | ByteClass | CharClass) => numericConversion(qual, s)
-                  case BooleanClass                             => If(qual, LIT(true.##), LIT(false.##))
-                  case LongClass                                => staticsCall(nme.longHash)
-                  case FloatClass                               => staticsCall(nme.floatHash)
-                  case DoubleClass                              => staticsCall(nme.doubleHash)
-                  case _                                        => staticsCall(nme.anyHash)
+                  case UnitClass | NullClass                         => LIT(0)
+                  case IntClass | ShortClass | ByteClass | CharClass => qual
+                  case BooleanClass                                  => If(qual, LIT(true.##), LIT(false.##))
+                  case LongClass                                     => staticsCall(nme.longHash)
+                  case FloatClass                                    => staticsCall(nme.floatHash)
+                  case DoubleClass                                   => staticsCall(nme.doubleHash)
+                  case _                                             => staticsCall(nme.anyHash)
                 }
               } else if (isPrimitiveValueClass(qual.tpe.typeSymbol)) {
                 // Rewrite 5.getClass to ScalaRunTime.anyValClass(5)
@@ -1193,7 +1195,7 @@ abstract class Erasure extends InfoTransform
             } else qual match {
               case New(tpt) if name == nme.CONSTRUCTOR && tpt.tpe.typeSymbol.isDerivedValueClass =>
                 // println("inject derived: "+arg+" "+tpt.tpe)
-                val List(arg) = args
+                val List(arg) = args: @unchecked
                 val attachment = new TypeRefAttachment(tree.tpe.asInstanceOf[TypeRef])
                 InjectDerivedValue(arg) updateAttachment attachment
               case _ =>

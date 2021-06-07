@@ -12,9 +12,10 @@
 
 package scala.tools.nsc
 
-import scala.reflect.internal.util.{ SourceFile, NoSourceFile, FreshNameCreator }
+import scala.annotation.nowarn
+import scala.reflect.internal.util.{FreshNameCreator, NoSourceFile, SourceFile}
 import scala.collection.mutable
-import scala.collection.mutable.{ LinkedHashSet, ListBuffer }
+import scala.collection.mutable.{LinkedHashSet, ListBuffer}
 
 trait CompilationUnits { global: Global =>
 
@@ -39,6 +40,7 @@ trait CompilationUnits { global: Global =>
   /** One unit of compilation that has been submitted to the compiler.
     * It typically corresponds to a single file of source code.  It includes
     * error-reporting hooks.  */
+  @nowarn("""cat=deprecation&origin=scala\.reflect\.macros\.Universe\.CompilationUnitContextApi""")
   class CompilationUnit(val source: SourceFile, freshNameCreator: FreshNameCreator) extends CompilationUnitContextApi { self =>
     def this(source: SourceFile) = this(source, new FreshNameCreator)
     /** the fresh name creator */
@@ -68,10 +70,10 @@ trait CompilationUnits { global: Global =>
     /** Note: depends now contains toplevel classes.
      *  To get their sourcefiles, you need to dereference with .sourcefile
      */
-    private[this] val _depends = mutable.HashSet[Symbol]()
+    private[this] val _depends = if (settings.YtrackDependencies.value) mutable.HashSet[Symbol]() else null
     @deprecated("Not supported and no longer used by Zinc", "2.12.9")
-    def depends = _depends
-    def registerDependency(symbol: Symbol): Unit = {
+    def depends: mutable.HashSet[Symbol] = if (_depends == null) mutable.HashSet[Symbol]() else _depends
+    def registerDependency(symbol: Symbol): Unit = if (settings.YtrackDependencies.value) {
       // sbt compatibility (scala/bug#6875)
       //
       // imagine we have a file named A.scala, which defines a trait named Foo and a module named Main
@@ -142,23 +144,8 @@ trait CompilationUnits { global: Global =>
     /** For sbt compatibility (https://github.com/scala/scala/pull/4588) */
     val icode: LinkedHashSet[icodes.IClass] = new LinkedHashSet
 
-    @deprecated("Call global.reporter.echo directly instead.", "2.11.2")
-    final def echo(pos: Position, msg: String): Unit    = reporter.echo(pos, msg)
-    @deprecated("Call global.reporter.error (or typer.context.error) directly instead.", "2.11.2")
-    final def error(pos: Position, msg: String): Unit   = reporter.error(pos, msg)
-    @deprecated("Call global.reporter.warning (or typer.context.warning) directly instead.", "2.11.2")
-    final def warning(pos: Position, msg: String): Unit = reporter.warning(pos, msg)
-
-    @deprecated("Call global.currentRun.reporting.deprecationWarning directly instead.", "2.11.2")
-    final def deprecationWarning(pos: Position, msg: String, since: String): Unit = currentRun.reporting.deprecationWarning(pos, msg, since)
-    @deprecated("Call global.currentRun.reporting.uncheckedWarning directly instead.", "2.11.2")
-    final def uncheckedWarning(pos: Position, msg: String): Unit   = currentRun.reporting.uncheckedWarning(pos, msg)
-
-    @deprecated("This method will be removed. It does nothing.", "2.11.2")
-    final def comment(pos: Position, msg: String): Unit = {}
-
     /** Is this about a .java source file? */
-    val isJava = source.file.name.endsWith(".java")
+    val isJava: Boolean = source.isJava
 
     override def toString() = source.toString()
   }

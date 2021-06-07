@@ -93,7 +93,7 @@ abstract class BTypesFromClassfile {
 
     val flags = classNode.access
 
-    /**
+    /*
      * Find all nested classes of classNode. The innerClasses attribute contains all nested classes
      * that are declared inside classNode or used in the bytecode of classNode. So some of them are
      * nested in some other class than classNode, and we need to filter them.
@@ -130,7 +130,8 @@ abstract class BTypesFromClassfile {
             classBTypeFromParsedClassfile(classNode.outerClass)
           }
         val staticFlag = (innerEntry.access & Opcodes.ACC_STATIC) != 0
-        NestedInfo(enclosingClass, Option(innerEntry.outerName), Option(innerEntry.innerName), staticFlag)
+        NestedInfo(enclosingClass, Option(innerEntry.outerName), Option(innerEntry.innerName), staticFlag,
+          (flags & Opcodes.ACC_PRIVATE) == Opcodes.ACC_PRIVATE)
     }
 
     val inlineInfo = inlineInfoFromClassfile(classNode)

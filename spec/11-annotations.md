@@ -14,15 +14,15 @@ chapter: 11
 ## Definition
 
 Annotations associate meta-information with definitions.
-A simple annotation has the form `@$c$` or `@$c(a_1 , \ldots , a_n)$`.
-Here, $c$ is a constructor of a class $C$, which must conform
+A simple annotation has the form `@´c´` or `@´c(a_1 , \ldots , a_n)´`.
+Here, ´c´ is a constructor of a class ´C´, which must conform
 to the class `scala.Annotation`.
 
 Annotations may apply to definitions or declarations, types, or
 expressions.  An annotation of a definition or declaration appears in
 front of that definition.  An annotation of a type appears after
-that type. An annotation of an expression $e$ appears after the
-expression $e$, separated by a colon. More than one annotation clause
+that type. An annotation of an expression ´e´ appears after the
+expression ´e´, separated by a colon. More than one annotation clause
 may apply to an entity. The order in which these annotations are given
 does not matter.
 
@@ -53,7 +53,7 @@ Java platform, the following annotations have a standard meaning.
 
   * `@SerialVersionUID(<longlit>)` Attaches a serial version identifier (a
     `long` constant) to a class.
-    This is equivalent to a the following field
+    This is equivalent to the following field
     definition in Java:
 
     ```java
@@ -105,7 +105,7 @@ Java platform, the following annotations have a standard meaning.
 
     ```scala
     def f(x: Option[Int]) = (x: @unchecked) match {
-    case Some(y) => y
+      case Some(y) => y
     }
     ```
 
@@ -148,7 +148,7 @@ Java platform, the following annotations have a standard meaning.
 
     Whenever the static type of an expression matches a specialized variant of
     a definition, the compiler will instead use the specialized version.
-    See the [specialization sid](http://docs.scala-lang.org/sips/completed/scala-specialization.html) for more details of the implementation.
+    See the [specialization sid](https://docs.scala-lang.org/sips/completed/scala-specialization.html) for more details of the implementation.
     
 
 ## User-defined Annotations

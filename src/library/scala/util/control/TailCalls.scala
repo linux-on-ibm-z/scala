@@ -19,7 +19,7 @@ package util.control
  *  of evaluating a tailcalling function can be retrieved from a `Tailrec`
  *  value using method `result`.
  *  Implemented as described in "Stackless Scala with Free Monads"
- *  [[http://blog.higher-order.com/assets/trampolines.pdf]]
+ *  [[https://blog.higher-order.com/assets/trampolines.pdf]]
  *
  *  Here's a usage example:
  *  {{{
@@ -37,7 +37,7 @@ package util.control
  *    if (n < 2) done(n) else for {
  *      x <- tailcall(fib(n - 1))
  *      y <- tailcall(fib(n - 2))
- *    } yield (x + y)
+ *    } yield x + y
  *
  *  fib(40).result
  *  }}}
@@ -46,7 +46,7 @@ object TailCalls {
 
   /** This class represents a tailcalling computation
    */
-  abstract class TailRec[+A] {
+  sealed abstract class TailRec[+A] {
 
     /** Continue the computation with `f`. */
     final def map[B](f: A => B): TailRec[B] =
@@ -57,7 +57,7 @@ object TailCalls {
     final def flatMap[B](f: A => TailRec[B]): TailRec[B] =
       this match {
         case Done(a) => Call(() => f(a))
-        case c@Call(_) => Cont(c, f)
+        case c @ Call(_) => Cont(c, f)
         // Take advantage of the monad associative law to optimize the size of the required stack
         case c: Cont[a1, b1] => Cont(c.a, (x: a1) => c.f(x) flatMap f)
       }

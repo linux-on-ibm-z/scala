@@ -40,7 +40,7 @@ import scala.runtime.Statics
   * {{{
   * def f[A](it: Iterator[A]) = {
   *   if (it.hasNext) {            // Safe to reuse "it" after "hasNext"
-  *     it.next                    // Safe to reuse "it" after "next"
+  *     it.next()                  // Safe to reuse "it" after "next"
   *     val remainder = it.drop(2) // it is *not* safe to use "it" again after this line!
   *     remainder.take(2)          // it is *not* safe to use "remainder" after this line!
   *   } else it
@@ -826,6 +826,15 @@ trait Iterator[+A] extends IterableOnce[A] with IterableOnceOps[A, Iterator, Ite
     }
   }
 
+  /** Checks whether corresponding elements of the given iterable collection
+   *  compare equal (with respect to `==`) to elements of this $coll.
+   *
+   *  @param that  the collection to compare
+   *  @tparam B    the type of the elements of collection `that`.
+   *  @return `true` if both collections contain equal elements in the same order, `false` otherwise.
+   *
+   *    @inheritdoc
+   */
   def sameElements[B >: A](that: IterableOnce[B]): Boolean = {
     val those = that.iterator
     while (hasNext && those.hasNext)

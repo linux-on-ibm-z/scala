@@ -13,7 +13,7 @@
 package scala
 package collection
 
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
 import scala.collection.Stepper.EfficientSplit
 import scala.math.Ordering
@@ -22,6 +22,7 @@ import scala.math.Ordering
 trait IndexedSeq[+A] extends Seq[A]
   with IndexedSeqOps[A, IndexedSeq, IndexedSeq[A]]
   with IterableFactoryDefaults[A, IndexedSeq] {
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "IndexedSeq"
 
   override def iterableFactory: SeqFactory[IndexedSeq] = IndexedSeq
@@ -54,6 +55,14 @@ trait IndexedSeqOps[+A, +CC[_], +C] extends Any with SeqOps[A, CC, C] { self =>
         i -= 1
         self(i)
       } else Iterator.empty.next()
+  }
+
+  override def foldRight[B](z: B)(op: (A, B) => B): B = {
+    val it = reverseIterator
+    var b = z
+    while (it.hasNext)
+      b = op(it.next(), b)
+    b
   }
 
   override def view: IndexedSeqView[A] = new IndexedSeqView.Id[A](this)

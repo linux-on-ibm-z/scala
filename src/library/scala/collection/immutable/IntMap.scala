@@ -17,6 +17,7 @@ import scala.collection.generic.{BitOperations, DefaultSerializationProxy}
 import scala.collection.mutable.{Builder, ImmutableBuilder}
 import scala.annotation.tailrec
 import scala.annotation.unchecked.uncheckedVariance
+import scala.language.implicitConversions
 
 /** Utility class for integer maps.
   */
@@ -163,7 +164,7 @@ private[immutable] class IntMapKeyIterator[V](it: IntMap[V]) extends IntMapItera
 import IntMap._
 
 /** Specialised immutable map structure for integer keys, based on
-  *  [[http://ittc.ku.edu/~andygill/papers/IntMap98.pdf Fast Mergeable Integer Maps]]
+  *  [[https://ittc.ku.edu/~andygill/papers/IntMap98.pdf Fast Mergeable Integer Maps]]
   *  by Okasaki and Gill. Essentially a trie based on binary digits of the integers.
   *
   *  '''Note:''' This class is as of 2.8 largely superseded by HashMap.
@@ -261,7 +262,7 @@ sealed abstract class IntMap[+T] extends AbstractMap[Int, T]
 
   override protected[this] def className = "IntMap"
 
-  override def isEmpty = this == IntMap.Nil
+  override def isEmpty = this eq IntMap.Nil
   override def knownSize: Int = if (isEmpty) 0 else super.knownSize
   override def filter(f: ((Int, T)) => Boolean): IntMap[T] = this match {
     case IntMap.Bin(prefix, mask, left, right) => {

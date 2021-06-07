@@ -116,7 +116,23 @@ trait StdAttachments {
     */
   case object KnownDirectSubclassesCalled extends PlainAttachment
 
+  case object DottyEnumSingleton extends PlainAttachment
+
+  class DottyParameterisedTrait(val params: List[Symbol])
+
+  class DottyOpaqueTypeAlias(val tpe: Type)
+
   class QualTypeSymAttachment(val sym: Symbol)
 
   case object ConstructorNeedsFence extends PlainAttachment
+
+  /** Mark the syntax for linting purposes. */
+  case object MultiargInfixAttachment extends PlainAttachment
+
+  case object NullaryOverrideAdapted extends PlainAttachment
+
+  // When typing a Def with this attachment, change the owner of its RHS from origalOwner to the symbol of the Def
+  case class ChangeOwnerAttachment(originalOwner: Symbol)
+
+  case object InterpolatedString extends PlainAttachment
 }

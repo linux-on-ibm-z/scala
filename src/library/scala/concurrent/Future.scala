@@ -41,7 +41,7 @@ import scala.concurrent.ExecutionContext.parasitic
  *  }
  *  }}}
  *
- *  @see [[http://docs.scala-lang.org/overviews/core/futures.html Futures and Promises]]
+ *  @see [[https://docs.scala-lang.org/overviews/core/futures.html Futures and Promises]]
  *
  *  @define multipleCallbacks
  *  Multiple callbacks may be registered; there is no guarantee that they will be
@@ -587,7 +587,8 @@ object Future {
             now = System.nanoTime()
           }
           // Done waiting, drop out
-        case _: FiniteDuration => // Drop out if 0 or less
+        case _: FiniteDuration    => // Drop out if 0 or less
+        case x: Duration.Infinite => throw new MatchError(x)
       }
       throw new TimeoutException(s"Future timed out after [$atMost]")
     }
@@ -687,7 +688,7 @@ object Future {
   *  @param executor  the execution context on which the `body` is evaluated in
   *  @return          the `Future` holding the result of the computation
   */
-  final def `delegate`[T](body: => Future[T])(implicit executor: ExecutionContext): Future[T] =
+  final def delegate[T](body: => Future[T])(implicit executor: ExecutionContext): Future[T] =
     unit.flatMap(_ => body)
 
   /** Simple version of `Future.traverse`. Asynchronously and non-blockingly transforms, in essence, a `IterableOnce[Future[A]]`
@@ -791,7 +792,7 @@ object Future {
    * @return         the `Future` holding the result of the fold
    */
   @deprecated("use Future.foldLeft instead", "2.12.0")
-  // not removed in 2.13, to facilitate 2.11/2.12/2.13 cross-building; remove in 2.14 (see scala/scala#6319)
+  // not removed in 2.13, to facilitate 2.11/2.12/2.13 cross-building; remove further down the line (see scala/scala#6319)
   def fold[T, R](futures: IterableOnce[Future[T]])(zero: R)(@deprecatedName("foldFun") op: (R, T) => R)(implicit executor: ExecutionContext): Future[R] =
     if (futures.isEmpty) successful(zero)
     else sequence(futures)(ArrayBuffer, executor).map(_.foldLeft(zero)(op))
@@ -810,7 +811,7 @@ object Future {
    * @return         the `Future` holding the result of the reduce
    */
   @deprecated("use Future.reduceLeft instead", "2.12.0")
-  // not removed in 2.13, to facilitate 2.11/2.12/2.13 cross-building; remove in 2.14 (see scala/scala#6319)
+  // not removed in 2.13, to facilitate 2.11/2.12/2.13 cross-building; remove further down the line (see scala/scala#6319)
   final def reduce[T, R >: T](futures: IterableOnce[Future[T]])(op: (R, T) => R)(implicit executor: ExecutionContext): Future[R] =
     if (futures.isEmpty) failed(new NoSuchElementException("reduce attempted on empty collection"))
     else sequence(futures)(ArrayBuffer, executor).map(_ reduceLeft op)

@@ -356,6 +356,7 @@ abstract class TreeGen extends scala.reflect.internal.TreeGen with TreeDSL {
     val selfParamSym = newSym.newSyntheticValueParam(newSym.owner.typeConstructor, nme.SELF).setFlag(ARTIFACT)
     newSym.updateInfo(newSym.info match {
       case mt @ MethodType(params, res) => copyMethodType(mt, selfParamSym :: params, res)
+      case x                            => throw new MatchError(x)
     })
     val selfParam = ValDef(selfParamSym)
     val rhs = orig.rhs.substituteThis(newSym.owner, gen.mkAttributedIdent(selfParamSym)) // scala/scala-dev#186 intentionally leaving Ident($this) is unpositioned
@@ -364,7 +365,7 @@ abstract class TreeGen extends scala.reflect.internal.TreeGen with TreeDSL {
   }
 
   def expandFunction(localTyper: analyzer.Typer)(fun: Function, inConstructorFlag: Long): Tree = {
-    val anonClass = fun.symbol.owner newAnonymousFunctionClass(fun.pos, inConstructorFlag)
+    val anonClass = fun.symbol.owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
     val parents = if (isFunctionType(fun.tpe)) {
       anonClass addAnnotation SerialVersionUIDAnnotation
       addSerializable(abstractFunctionType(fun.vparams.map(_.symbol.tpe), fun.body.tpe.deconst))

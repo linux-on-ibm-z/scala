@@ -3,10 +3,9 @@
  */
 
 import scala.concurrent.duration._
-import scala.reflect._
 import scala.tools.testkit.AssertUtil.assertThrows
 
-import scala.language.{ postfixOps }
+import scala.language.postfixOps
 
 object Test extends App {
 
@@ -224,4 +223,12 @@ object Test extends App {
   
   // scala/bug#10320
   Duration("6803536004516701ns").toNanos mustBe 6803536004516701L
+
+  // scala/bug#12180
+  Duration("9007199254740992 microseconds").toString mustBe "9007199254740992 microseconds"
+  Duration("9007199254740993 microseconds").toString mustBe "9007199254740993 microseconds"
+  Duration("-9007199254740992 microseconds").toString mustBe "-9007199254740992 microseconds"
+  Duration("-9007199254740993 microseconds").toString mustBe "-9007199254740993 microseconds"
+  Duration("-7036832630452943 microseconds").toString mustBe "-7036832630452943 microseconds"
+  Duration("2.134 s") mustBe Duration(2134, MILLISECONDS)
 }

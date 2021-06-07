@@ -83,19 +83,21 @@ trait Unapplies extends ast.TreeDSL {
   }
 
   private def constrParamss(cdef: ClassDef): List[List[ValDef]] = {
-    val prunedClassDef = deriveClassDef(cdef)(tmpl => deriveTemplate(tmpl)(stats => treeInfo.firstConstructor(stats).duplicate :: Nil))
-    val ClassDef(_, _, _, Template(_, _, firstConstructor :: Nil)) = resetAttrs(prunedClassDef)
-    val DefDef(_, _, _, vparamss, _, _) = firstConstructor
-    vparamss
+    resetAttrs(deriveClassDef(cdef)(deriveTemplate(_)(treeInfo.firstConstructor(_).duplicate :: Nil))) match {
+      case ClassDef(_, _, _, Template(_, _, DefDef(_, _, _, vparamss, _, _) :: Nil)) => vparamss
+      case x                                                                         => throw new MatchError(x)
+    }
   }
 
   private def constrTparamsInvariant(cdef: ClassDef): List[TypeDef] = {
-    val prunedClassDef = deriveClassDef(cdef)(tmpl => Template(Nil, noSelfType, Nil))
-    val ClassDef(_, _, tparams, _) = resetAttrs(prunedClassDef.duplicate)
-    val tparamsInvariant = tparams.map(tparam => copyTypeDef(tparam)(mods = tparam.mods &~ (COVARIANT | CONTRAVARIANT)))
-    tparamsInvariant
+    resetAttrs(deriveClassDef(cdef)(_ => Template(Nil, noSelfType, Nil)).duplicate) match {
+      case ClassDef(_, _, tparams, _) => tparams.map(tparam => copyTypeDef(tparam)(mods = tparam.mods &~ (COVARIANT | CONTRAVARIANT)))
+      case x                          => throw new MatchError(x)
+    }
   }
 
+  private def applyShouldInheritAccess(mods: Modifiers) =
+    currentRun.isScala3 && (mods.hasFlag(PRIVATE) || (!mods.hasFlag(PROTECTED) && mods.hasAccessBoundary))
 
   /** The module corresponding to a case class; overrides toString to show the module's name
    */
@@ -104,7 +106,7 @@ trait Unapplies extends ast.TreeDSL {
     def inheritFromFun = !cdef.mods.hasAbstractFlag && cdef.tparams.isEmpty && (params match {
       case List(ps) if ps.length <= MaxFunctionArity => true
       case _ => false
-    })
+    }) && !applyShouldInheritAccess(constrMods(cdef))
     def createFun = {
       def primaries = params.head map (_.tpt)
       gen.scalaFunctionConstr(primaries, toIdent(cdef), abstractFun = true)
@@ -142,9 +144,20 @@ trait Unapplies extends ast.TreeDSL {
     )
   }
 
+
+  private def constrMods(cdef: ClassDef): Modifiers = treeInfo.firstConstructorMods(cdef.impl.body)
+
   /** The apply method corresponding to a case class
    */
-  def caseModuleApplyMeth(cdef: ClassDef): DefDef = factoryMeth(caseMods, nme.apply, cdef)
+  def caseModuleApplyMeth(cdef: ClassDef): DefDef = {
+    val inheritedMods = constrMods(cdef)
+    val mods =
+      if (applyShouldInheritAccess(inheritedMods))
+        (caseMods | (inheritedMods.flags & PRIVATE)).copy(privateWithin = inheritedMods.privateWithin)
+      else
+        caseMods
+    factoryMeth(mods, nme.apply, cdef)
+  }
 
   /** The unapply method corresponding to a case class
    */
@@ -155,7 +168,7 @@ trait Unapplies extends ast.TreeDSL {
       case _                                                          => nme.unapply
     }
     val cparams = List(ValDef(Modifiers(PARAM | SYNTHETIC), unapplyParamName, classType(cdef, tparams), EmptyTree))
-    val resultType = if (!currentRun.isScala212) TypeTree() else { // fix for scala/bug#6541 under -Xsource:2.12
+    val resultType = { // fix for scala/bug#6541 under -Xsource:2.12
       def repeatedToSeq(tp: Tree) = tp match {
         case AppliedTypeTree(Select(_, tpnme.REPEATED_PARAM_CLASS_NAME), tps) => AppliedTypeTree(gen.rootScalaDot(tpnme.Seq), tps)
         case _                                                                => tp
@@ -257,8 +270,14 @@ trait Unapplies extends ast.TreeDSL {
       val classTpe = classType(cdef, tparams)
       val argss = mmap(paramss)(toIdent)
       val body: Tree = New(classTpe, argss)
+      val copyMods =
+        if (currentRun.isScala3) {
+          val inheritedMods = constrMods(cdef)
+          Modifiers(SYNTHETIC | (inheritedMods.flags & AccessFlags), inheritedMods.privateWithin)
+        }
+        else Modifiers(SYNTHETIC)
       val copyDefDef = atPos(cdef.pos.focus)(
-        DefDef(Modifiers(SYNTHETIC), nme.copy, tparams, paramss, TypeTree(), body)
+        DefDef(copyMods, nme.copy, tparams, paramss, TypeTree(), body)
       )
       Some(copyDefDef)
     }

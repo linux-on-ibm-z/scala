@@ -1,3 +1,4 @@
+// scalac: -Xsource:3.0
 class A
 class B extends A
 
@@ -16,7 +17,7 @@ object ZA extends Z[A] {
 }
 
 object XB extends X[B] {
-  def y(b: B) = new Y { def value = s"S{b.getClass}: BValue" }
+  def y(b: B) = new Y { def value = s"${b.getClass}: BValue" }
 }
 
 object Test {

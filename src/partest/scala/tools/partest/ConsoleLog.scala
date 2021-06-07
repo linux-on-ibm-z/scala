@@ -23,9 +23,13 @@ class ConsoleLog(colorEnabled: Boolean) {
   val magenta = colored(Console.MAGENTA)
 
   private[this] var dotCount = 0
-  private[this] val DotWidth = 72
+  private[this] final val DotWidth = 72
 
-  def leftFlush(): Unit = {
+  def print(text: String) = synchronized {
+    Console.out.print(text)
+  }
+
+  def leftFlush(): Unit = synchronized {
     if (dotCount != 0) {
       normal("\n")
       dotCount = 0
@@ -61,8 +65,9 @@ class ConsoleLog(colorEnabled: Boolean) {
   def echoWarning(msg: String) = echo(bold(red(msg)))
 
   def printDot(): Unit = printProgress(".")
+  def printS(): Unit = printProgress(_warning + "s" +_default)
   def printEx(): Unit  = printProgress(_failure + "X" + _default)
-  private def printProgress(icon: String): Unit =
+  private def printProgress(icon: String): Unit = synchronized {
     if (dotCount >= DotWidth) {
       outline("\n" + icon)
       dotCount = 1
@@ -70,4 +75,5 @@ class ConsoleLog(colorEnabled: Boolean) {
       outline(icon)
       dotCount += 1
     }
+  }
 }

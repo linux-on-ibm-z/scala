@@ -57,7 +57,7 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
   def isTrace: Boolean = config.isReplTrace
 
   var printResults: Boolean = true
-  override def togglePrintResults: Unit = printResults = !printResults
+  override def togglePrintResults(): Unit = printResults = !printResults
   def withoutPrintingResults[T](body: => T): T = {
     val saved = printResults
     printResults = false
@@ -77,7 +77,6 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
         // don't truncate stack traces
         withoutTruncating { printMessage(error) }
     }
-
 
   // whether to print anything
   var totalSilence: Boolean = false
@@ -113,8 +112,8 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
   }
 
   /** String unwrapping can be disabled if it is causing issues.
-    *  Setting this to false means you will see Strings like "$iw.$iw.".
-    */
+   *  Setting this to false means you will see Strings like "\$iw.\$iw.".
+   */
   var unwrapStrings = true
   def withoutUnwrapping(op: => Unit): Unit = {
     val saved = unwrapStrings
@@ -128,7 +127,11 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
 
   var currentRequest: ReplRequest = _
 
-  import scala.io.AnsiColor.{RED, RESET, YELLOW}
+  import scala.io.AnsiColor.{BOLD, BLUE, GREEN, RED, RESET, YELLOW}
+
+  def color(c: String, s: String) = if (colorOk) BOLD + c + s + RESET else s
+  def nameToCode(s: String)       = color(BLUE, s)
+  def typeToCode(s: String)       = color(GREEN, s)
 
   private def label(severity: Severity): String = severity match {
     case internal.Reporter.ERROR   => "error"
@@ -155,13 +158,27 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
     printMessage(pos, prefix + msg)
   }
 
+  private var boringExplanations = Set.empty[String]
+
   // indent errors, error message uses the caret to point at the line already on the screen instead of repeating it
   // TODO: can we splice the error into the code the user typed when multiple lines were entered?
   // (should also comment out the error to keep multi-line copy/pastable)
   // TODO: multiple errors are not very intuitive (should the second error for same line repeat the line?)
-  // TODO: the console could be empty due to external changes (also, :reset? -- see unfortunate example in jvm/interpeter (plusOne))
+  // TODO: the console could be empty due to external changes (also, :reset? -- see unfortunate example in jvm/interpreter (plusOne))
   def printMessage(posIn: Position, msg0: String): Unit = {
-    val msg = Reporter.explanation(msg0)
+    val msg = {
+      val main = Reporter.stripExplanation(msg0)
+      if (main eq msg0) main
+      else {
+        val (_, explanation) = Reporter.splitExplanation(msg0)
+        val suffix = explanation.mkString("\n")
+        if (boringExplanations(suffix)) main
+        else {
+          boringExplanations += suffix
+          s"$main\n$suffix"
+        }
+      }
+    }
     if ((posIn eq null) || (posIn.source eq NoSourceFile)) printMessage(msg)
     else if (posIn.source.file.name == "<console>" && posIn.line == 1) {
       // If there's only one line of input, and it's already printed on the console (as indicated by the position's source file name),
@@ -184,7 +201,7 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
 
       // for errors in synthetic code, don't remove wrapping so we can see what's really going on
       def printLineContent() = printMessage(indentation + posIn.lineContent)
-      if (isSynthetic) withoutUnwrapping(printLineContent) else printLineContent
+      if (isSynthetic) withoutUnwrapping(printLineContent()) else printLineContent()
 
       printMessage(indentation + posIn.lineCaret)
 
@@ -224,7 +241,7 @@ class ReplReporterImpl(val config: ShellConfig, val settings: Settings = new Set
     }
 
   override def rerunWithDetails(setting: reflect.internal.settings.MutableSettings#Setting, name: String): String =
-    s"; for details, enable `:setting $name' or `:replay $name'"
+    s"; for details, enable `:setting $name` or `:replay $name`"
 
   override def finish() = {
     if (hasWarnings) printMessage(s"${StringOps.countElementsAsString(warningCount, label(WARNING))} found")

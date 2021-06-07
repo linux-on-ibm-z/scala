@@ -18,6 +18,7 @@ package patmat
 
 import scala.tools.nsc.typechecker.Contexts
 import scala.reflect.internal.util
+import scala.tools.nsc.Reporting.WarningCategory
 
 /** An 'extractor' can be a case class or an unapply or unapplySeq method.
   *
@@ -126,7 +127,7 @@ trait PatternExpansion {
     // rest is private
     private val isUnapply        = fun.symbol.name == nme.unapply
     private val isUnapplySeq     = fun.symbol.name == nme.unapplySeq
-    private def isBooleanUnapply = isUnapply && unapplyResultType() =:= BooleanTpe
+    private def isBooleanUnapply = isUnapply && unapplyResultType().typeSymbol == definitions.BooleanClass
     private def isRepeatedCaseClass = caseCtorParamTypes.exists(tpes => tpes.nonEmpty && isScalaRepeatedParamType(tpes.last))
 
     private def caseCtorParamTypes: Option[List[Type]] =
@@ -162,7 +163,7 @@ trait PatternExpansion {
       val res = resultOfGetInMonad()
       // Can't only check for _1 thanks to pos/t796.
       if (res.hasNonPrivateMember(nme._1) && res.hasNonPrivateMember(nme._2))
-        Some(Stream.from(1).map(n => res.nonPrivateMember(newTermName("_" + n))).
+        Some(LazyList.from(1).map(n => res.nonPrivateMember(newTermName("_" + n))).
              takeWhile(m => m.isMethod && m.paramLists.isEmpty).toList.map(m => res.memberType(m).resultType))
       else None
     }
@@ -218,8 +219,8 @@ trait PatternExpansion {
     // errors & warnings
 
     private def err(msg: String) = context.error(fun.pos,msg)
-    private def warn(msg: String) = context.warning(fun.pos,msg)
-    private def depr(msg: String, since: String) = currentRun.reporting.deprecationWarning(fun.pos, fun.symbol.owner, msg, since)
+    private def warn(msg: String, cat: WarningCategory) = context.warning(fun.pos,msg, cat)
+    private def depr(msg: String, since: String) = runReporting.deprecationWarning(fun.pos, origin = fun.symbol.owner, site = context.owner.asInstanceOf[global.Symbol], msg, since)
 
     private def warnPatternTupling() =
       if (effectivePatternArity(args) == 1 && tupleValuedUnapply) {
@@ -228,7 +229,7 @@ trait PatternExpansion {
           else s" to hold ${equivConstrParamTypes.mkString("(", ", ", ")")}"
         val sym = fun.symbol.owner
         val arr = equivConstrParamTypes.length
-        depr(s"${sym} expects $arr patterns$acceptMessage but crushing into $arr-tuple to fit single pattern (scala/bug#6675)", "2.11.0")
+        depr(s"deprecated adaptation: ${sym} expects $arr patterns$acceptMessage but crushing into $arr-tuple to fit single pattern (scala/bug#6675)", "2.11.0")
       }
 
     private def arityError(mismatch: String) = {
@@ -247,12 +248,16 @@ trait PatternExpansion {
 
     // emit error/warning on mismatch
     if (isStar && !isSeq) err("Star pattern must correspond with varargs or unapplySeq")
-    else if (equivConstrParamTypes == List(NoType)) err(s"The result type of an ${fun.symbol.name} method must contain a member `get` to be used as an extractor pattern, no such member exists in ${unapplyResultType()}")
+    else if (equivConstrParamTypes == List(NoType) && unapplyResultType().isNothing)
+      err(s"${fun.symbol.owner} can't be used as an extractor: The result type of an ${fun.symbol.name} method may not be Nothing")
+    else if (equivConstrParamTypes == List(NoType))
+      err(s"The result type of an ${fun.symbol.name} method must contain a member `get` to be used as an extractor pattern, no such member exists in ${unapplyResultType()}")
     else if (elementArity < 0) arityError("not enough")
     else if (elementArity > 0 && !isSeq) arityError("too many")
     else if (settings.warnStarsAlign && isSeq && productArity > 0 && elementArity > 0) warn(
       if (isStar) "Sequence wildcard (_*) does not align with repeated case parameter or extracted sequence; the result may be unexpected."
-      else "A repeated case parameter or extracted sequence is not matched by a sequence wildcard (_*), and may fail at runtime.")
+      else "A repeated case parameter or extracted sequence is not matched by a sequence wildcard (_*), and may fail at runtime.",
+      WarningCategory.LintStarsAlign)
 
   }
 }

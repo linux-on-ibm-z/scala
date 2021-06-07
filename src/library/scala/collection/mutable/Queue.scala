@@ -13,6 +13,7 @@
 package scala.collection
 package mutable
 
+import scala.annotation.nowarn
 import scala.collection.generic.DefaultSerializable
 
 
@@ -40,6 +41,7 @@ class Queue[A] protected (array: Array[AnyRef], start: Int, end: Int)
 
   override def iterableFactory: SeqFactory[Queue] = Queue
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "Queue"
 
   /**
@@ -67,10 +69,10 @@ class Queue[A] protected (array: Array[AnyRef], start: Int, end: Int)
   def enqueueAll(elems: scala.collection.IterableOnce[A]): this.type = this ++= elems
 
   /**
-    * Removes the from element from this queue and return it
+    * Removes the first element from this queue and returns it
     *
     * @return
-    * @throws java.util.NoSuchElementException when queue is empty
+    * @throws NoSuchElementException when queue is empty
     */
   def dequeue(): A = removeHead()
 

@@ -1,4 +1,4 @@
-// scalac: -Ywarn-unused:params -Xfatal-warnings
+// scalac: -Wunused:params -Werror
 //
 
 trait InterFace {
@@ -13,7 +13,7 @@ trait BadAPI extends InterFace {
     println(c)
     a
   }
-  @deprecated ("no warn in deprecated API", since="yesterday")
+  @deprecated("no warn in deprecated API", since="yesterday")
   def g(a: Int,
         b: String,               // no warn
         c: Double): Int = {
@@ -90,7 +90,13 @@ trait Anonymous {
 
   def f1 = (_: Int) => 42     // no warn underscore parameter (a fresh name)
 
-  def f2: Int => Int = _ + 1  // no warn placeholder syntax (a fresh name and synthethic parameter)
+  def f2: Int => Int = _ + 1  // no warn placeholder syntax (a fresh name and synthetic parameter)
 
   def g = for (i <- List(1)) yield 42    // warn map.(i => 42)
 }
+trait Context[A]
+trait Implicits {
+  def f[A](implicit ctx: Context[A]) = 42
+  def g[A: Context] = 42
+}
+class Bound[A: Context]

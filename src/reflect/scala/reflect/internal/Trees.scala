@@ -15,11 +15,11 @@ package reflect
 package internal
 
 import Flags._
-import scala.annotation.tailrec
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.reflect.macros.Attachments
-import util.{Statistics, StatisticsStatics}
+import util.{ReusableInstance, Statistics}
 
 trait Trees extends api.Trees {
   self: SymbolTable =>
@@ -46,9 +46,6 @@ trait Trees extends api.Trees {
   abstract class Tree extends TreeContextApiImpl with Attachable with Product {
     val id = nodeCount // TODO: add to attachment?
     nodeCount += 1
-
-    if (StatisticsStatics.areSomeHotStatsEnabled())
-      statistics.incCounter(statistics.nodeByType, getClass)
 
     final override def pos: Position = rawatt.pos
 
@@ -171,6 +168,35 @@ trait Trees extends api.Trees {
       productIterator foreach subtrees
       if (builder eq null) Nil else builder.result()
     }
+    /** Equivalent to `{this.children.takeWhile(f); ()}, but more efficient` */
+    final def foreachChild(f: Tree => Boolean): Unit = {
+      def subtrees(x: Any): Boolean = x match {
+        case EmptyTree =>
+          true
+        case t: Tree =>
+          f(t)
+        case xs: List[_] =>
+          var rest = xs
+          while (!rest.isEmpty) {
+            if (!subtrees(rest.head)) return false
+            rest = rest.tail
+          }
+          true
+        case _ =>
+          true
+      }
+      val N = productArity
+      var i = 0
+      while (i < N) {
+        if (!subtrees(productElement(i))) return
+        i += 1
+      }
+    }
+
+    /** Equivalent to `this.children.headOption.getOrElse(EmptyTree)`, but more efficient. */
+    final def onlyChild: Tree = {
+      onlyChildAccumulator.using(accum => { foreachChild(accum); accum.result()})
+    }
 
     def freeTerms: List[FreeTermSymbol] = freeSyms(terms = true, types = false).asInstanceOf[List[FreeTermSymbol]]
     def freeTypes: List[FreeTypeSymbol] = freeSyms(terms = false, types = true).asInstanceOf[List[FreeTypeSymbol]]
@@ -249,7 +275,7 @@ trait Trees extends api.Trees {
         )
     }
     def transform(transformer: Transformer): Tree = xtransform(transformer, this)
-    def traverse(traverser: Traverser): Unit = xtraverse(traverser, this)
+    def traverse(traverser: Traverser): Unit = xtraverse(traverser, this): @nowarn("cat=deprecation")
   }
 
   trait TermTree extends Tree with TermTreeApi
@@ -282,17 +308,19 @@ trait Trees extends api.Trees {
       case qual if qual.isType =>
         assert(name.isTypeName, s"qual = $qual, name = $name")
         SelectFromTypeTree(qual, name.toTypeName)
+      case x => throw new MatchError(x)
     }
     def unapply(refTree: RefTree): Option[(Tree, Name)] = Some((refTree.qualifier, refTree.name))
   }
 
-  abstract class DefTree extends SymTree with NameTree with DefTreeApi {
+  sealed abstract class DefTree extends SymTree with NameTree with DefTreeApi {
     def name: Name
     override def isDef = true
   }
 
-  abstract class MemberDef extends DefTree with MemberDefApi {
+  sealed abstract class MemberDef extends DefTree with MemberDefApi {
     def mods: Modifiers
+
     def keyword: String = this match {
       case TypeDef(_, _, _, _)      => "type"
       case ClassDef(mods, _, _, _)  => if (mods hasFlag TRAIT) "trait" else "class"
@@ -300,9 +328,7 @@ trait Trees extends api.Trees {
       case ModuleDef(_, _, _)       => "object"
       case PackageDef(_, _)         => "package"
       case ValDef(mods, _, _, _)    => if (mods hasFlag MUTABLE) "var" else "val"
-      case _ => ""
     }
-
   }
 
   case class PackageDef(pid: RefTree, stats: List[Tree])
@@ -323,7 +349,7 @@ trait Trees extends api.Trees {
   }
   object PackageDef extends PackageDefExtractor
 
-  abstract class ImplDef extends MemberDef with ImplDefApi {
+  sealed abstract class ImplDef extends MemberDef with ImplDefApi {
     def impl: Template
   }
 
@@ -386,7 +412,7 @@ trait Trees extends api.Trees {
       }
   }
 
-  abstract class ValOrDefDef extends MemberDef with ValOrDefDefApi {
+  sealed abstract class ValOrDefDef extends MemberDef with ValOrDefDefApi {
     def name: TermName
     def tpt: Tree
     def rhs: Tree
@@ -847,11 +873,13 @@ trait Trees extends api.Trees {
   case class ReferenceToBoxed(ident: Ident) extends TermTree with ReferenceToBoxedApi {
     override def symbol: Symbol = ident.symbol
     override def symbol_=(sym: Symbol): Unit = { ident.symbol = sym }
-    override def transform(transformer: Transformer): Tree =
-      transformer.treeCopy.ReferenceToBoxed(this, transformer.transform(ident) match { case idt1: Ident => idt1 })
-    override def traverse(traverser: Traverser): Unit = {
-      traverser.traverse(ident)
+    override def transform(transformer: Transformer): Tree = {
+      transformer.treeCopy.ReferenceToBoxed(this, transformer.transform(ident) match {
+        case idt1: Ident => idt1
+        case x           => throw new MatchError(x)
+      })
     }
+    override def traverse(traverser: Traverser): Unit = traverser.traverse(ident)
   }
   object ReferenceToBoxed extends ReferenceToBoxedExtractor
 
@@ -1439,7 +1467,7 @@ trait Trees extends api.Trees {
     private def requireLegal(value: Any, allowed: Any, what: String) = (
       if (value != allowed) {
         log(s"can't set $what for $self to value other than $allowed")
-        if (settings.debug && settings.developer)
+        if (settings.isDebug && settings.isDeveloper)
           (new Throwable).printStackTrace
       }
     )
@@ -1556,15 +1584,11 @@ trait Trees extends api.Trees {
 
   /** Block factory that flattens directly nested blocks.
    */
-  def Block(stats: Tree*): Block = {
-    if (stats.isEmpty) Block(Nil, Literal(Constant(())))
-    else stats match {
-      case Seq(b @ Block(_, _)) => b
-      case Seq(stat) => Block(stats.toList, Literal(Constant(())))
-      case Seq(_, rest @ _*) => Block(stats.init.toList, stats.last)
-    }
+  def Block(stats: Tree*): Block = stats match {
+    case Seq(b @ Block(_, _)) => b
+    case init :+ last         => Block(init.toList, last)
+    case _                    => Block(stats.toList, Literal(Constant(())))
   }
-
 
   /** Delegate for a TypeTree symbol. This operation is unsafe because
    *  it may trigger type checking when forcing the type symbol of the
@@ -1575,13 +1599,13 @@ trait Trees extends api.Trees {
 
   // --- generic traversers and transformers
 
-  @deprecated("2.12.3", "Use Tree#traverse instead")
+  @deprecated("Use Tree#traverse instead", since = "2.12.3")
   override protected def itraverse(traverser: Traverser, tree: Tree): Unit = {
     tree.traverse(traverser)
   }
 
   //OPT ordered according to frequency to speed it up.
-  @deprecated("2.12.3", "Use Tree#transform instead")
+  @deprecated("Use Tree#transform instead", since = "2.12.3")
   override protected def itransform(transformer: Transformer, tree: Tree): Tree = {
     tree.transform(transformer)
   }
@@ -1721,7 +1745,7 @@ trait Trees extends api.Trees {
 
   lazy val EmptyTreeTypeSubstituter = new TreeTypeSubstituter(List(), List())
 
-  class TreeSymSubstTraverser(val from: List[Symbol], val to: List[Symbol]) extends TypeMapTreeSubstituter(new SubstSymMap(from, to)) {
+  class TreeSymSubstTraverser(val from: List[Symbol], val to: List[Symbol]) extends TypeMapTreeSubstituter(SubstSymMap(from, to)) {
     override def toString() = "TreeSymSubstTraverser/" + substituterString("Symbol", "Symbol", from, to)
   }
 
@@ -1735,7 +1759,7 @@ trait Trees extends api.Trees {
    *  a symbol in `from` will have a new type assigned.
    */
   class TreeSymSubstituter(from: List[Symbol], to: List[Symbol]) extends InternalTransformer {
-    val symSubst = new SubstSymMap(from, to)
+    val symSubst = SubstSymMap(from, to)
     private[this] var mutatedSymbols: List[Symbol] = Nil
     override def transform(tree: Tree): Tree = {
       @tailrec
@@ -2005,6 +2029,27 @@ trait Trees extends api.Trees {
       throw new IllegalStateException("Not a Function: " + t + "/" + t.getClass)
   }
 
+  private final class OnlyChildAccumulator extends (Tree => Boolean) {
+    private[this] var only: Tree = _
+    def apply(t: Tree): Boolean = {
+      if (only == null) {
+        only = t
+        true
+      } else {
+        only = null
+        false // stop traversal
+      }
+    }
+    def result(): Tree = {
+      if (only == null) EmptyTree
+      else {
+        try only
+        finally only = null
+      }
+    }
+  }
+  private val onlyChildAccumulator = ReusableInstance[OnlyChildAccumulator](new OnlyChildAccumulator, enabled = isCompilerUniverse)
+
 // -------------- Classtags --------------------------------------------------------
 
   implicit val AlternativeTag         = ClassTag[Alternative](classOf[Alternative])
@@ -2066,7 +2111,6 @@ trait TreesStats {
   self: Statistics =>
   val symbolTable: SymbolTable
   val treeNodeCount = newView("#created tree nodes")(symbolTable.nodeCount)
-  val nodeByType = newByClass("#created tree nodes by type")(newCounter(""))
   val retainedCount  = newCounter("#retained tree nodes")
   val retainedByType = newByClass("#retained tree nodes by type")(newCounter(""))
 }

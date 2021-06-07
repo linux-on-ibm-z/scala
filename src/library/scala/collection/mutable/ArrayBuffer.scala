@@ -16,15 +16,17 @@ package mutable
 
 import java.util.Arrays
 
+import scala.annotation.nowarn
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializable
+import scala.util.chaining._
 
 /** An implementation of the `Buffer` class using an array to
   *  represent the assembled sequence internally. Append, update and random
   *  access take constant time (amortized time). Prepends and removes are
   *  linear in the buffer size.
   *
-  *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#array-buffers "Scala's Collection Library overview"]]
+  *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#array-buffers "Scala's Collection Library overview"]]
   *  section on `Array Buffers` for more information.
 
   *
@@ -72,29 +74,22 @@ class ArrayBuffer[A] private (initialElements: Array[AnyRef], initialSize: Int)
     size0 = n
   }
 
-  /** Trims the ArrayBuffer to an appropriate size for the current number of elements (rounding up to the next
-    * natural size), which may replace the array by a shorter one. This allows releasing some unused memory. */
+  /** Trims the ArrayBuffer to an appropriate size for the current
+   *  number of elements (rounding up to the next natural size),
+   *  which may replace the array by a shorter one.
+   *  This allows releasing some unused memory.
+   */
   def trimToSize(): Unit = resize(length)
 
   /** Trims the `array` buffer size down to either a power of 2
-    * or Int.MaxValue while keeping first `requiredLength` elements. */
-  private[this] def resize(requiredLength: Int): Unit = {
-    var newSize: Long = array.length
-    if (newSize == Int.MaxValue) {
-      newSize += 1 // ensure that newSize is a power of 2
-    }
-    val minLength = ArrayBuffer.DefaultInitialSize max requiredLength
-    while (newSize / 2 >= minLength) newSize /= 2
-    if (newSize != array.length && newSize < Int.MaxValue) {
-      val newArray: Array[AnyRef] = new Array(newSize.toInt)
-      Array.copy(array, 0, newArray, 0, requiredLength)
-      array = newArray
-    }
-  }
+   *  or Int.MaxValue while keeping first `requiredLength` elements.
+   */
+  private def resize(requiredLength: Int): Unit =
+    array = ArrayBuffer.downsize(array, requiredLength)
 
   @inline private def checkWithinBounds(lo: Int, hi: Int) = {
-    if (lo < 0) throw new IndexOutOfBoundsException(s"$lo is out of bounds (min 0, max ${size0-1})")
-    if (hi > size0) throw new IndexOutOfBoundsException(s"$hi is out of bounds (min 0, max ${size0 - 1})")
+    if (lo < 0) throw new IndexOutOfBoundsException(s"$lo is out of bounds (min 0, max ${size0 - 1})")
+    if (hi > size0) throw new IndexOutOfBoundsException(s"${hi - 1} is out of bounds (min 0, max ${size0 - 1})")
   }
 
   def apply(n: Int): A = {
@@ -217,9 +212,8 @@ class ArrayBuffer[A] private (initialElements: Array[AnyRef], initialSize: Int)
   @deprecatedOverriding("ArrayBuffer[A] no longer extends Builder[A, ArrayBuffer[A]]", "2.13.0")
   @inline def mapResult[NewTo](f: (ArrayBuffer[A]) => NewTo): Builder[A, NewTo] = new GrowableBuilder[A, ArrayBuffer[A]](this).mapResult(f)
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "ArrayBuffer"
-
-  override def copyToArray[B >: A](xs: Array[B], start: Int): Int = copyToArray[B](xs, start, length)
 
   override def copyToArray[B >: A](xs: Array[B], start: Int, len: Int): Int = {
     val copied = IterableOnce.elemsToCopyToArray(length, xs.length, start, len)
@@ -258,8 +252,7 @@ object ArrayBuffer extends StrictOptimizedSeqFactory[ArrayBuffer] {
     val k = coll.knownSize
     if (k >= 0) {
       val array = new Array[AnyRef](k max DefaultInitialSize)
-      val it = coll.iterator
-      for (i <- 0 until k) array(i) = it.next().asInstanceOf[AnyRef]
+      IterableOnce.copyElemsToArray(coll, array.asInstanceOf[Array[Any]])
       new ArrayBuffer[B](array, k)
     }
     else new ArrayBuffer[B] ++= coll
@@ -272,24 +265,33 @@ object ArrayBuffer extends StrictOptimizedSeqFactory[ArrayBuffer] {
 
   def empty[A]: ArrayBuffer[A] = new ArrayBuffer[A]()
 
+  // if necessary, copy (n elements of) the array to a new array of capacity n.
+  // Should use Array.copyOf(array, resizeEnsuring(array.length, n))?
+  //
   private def ensureSize(array: Array[AnyRef], end: Int, n: Int): Array[AnyRef] = {
-    // Use a Long to prevent overflows
-    val arrayLength: Long = array.length
-    def growArray = {
-      var newSize: Long = math.max(arrayLength * 2, DefaultInitialSize)
-      while (n > newSize)
-        newSize = newSize * 2
-      // Clamp newSize to Int.MaxValue
-      if (newSize > Int.MaxValue) {
-        if (end == Int.MaxValue) throw new Exception(s"Collections can not have more than ${Int.MaxValue} elements")
-        newSize = Int.MaxValue
-      }
-
-      val newArray: Array[AnyRef] = new Array(newSize.toInt)
-      Array.copy(array, 0, newArray, 0, end)
-      newArray
+    def resizeEnsuring(length: Int, end: Int, n: Int): Int = {
+      var newSize: Long = length
+      newSize = math.max(newSize * 2, DefaultInitialSize)
+      while (newSize < n) newSize *= 2
+      if (newSize <= Int.MaxValue) newSize.toInt
+      else if (end == Int.MaxValue) throw new Exception(s"Collections can not have more than ${Int.MaxValue} elements")
+      else Int.MaxValue
     }
-    if (n <= arrayLength) array else growArray
+    if (n <= array.length) array
+    else new Array[AnyRef](resizeEnsuring(array.length, end, n)).tap(Array.copy(array, 0, _, 0, end))
+  }
+  private def downsize(array: Array[AnyRef], requiredLength: Int): Array[AnyRef] = {
+    def resizeDown(length: Int, requiredLength: Int): Int = {
+      var newSize: Long = length
+      // ensure that newSize is a power of 2 (this tweak is not motivated)
+      if (newSize == Int.MaxValue) newSize += 1
+      val minLength = math.max(requiredLength, DefaultInitialSize)
+      while (newSize / 2 >= minLength) newSize /= 2
+      if (newSize <= Int.MaxValue) newSize.toInt
+      else Int.MaxValue
+    }
+    if (requiredLength >= array.length) array
+    else new Array[AnyRef](resizeDown(array.length, requiredLength)).tap(Array.copy(array, 0, _, 0, requiredLength))
   }
 }
 

@@ -14,7 +14,9 @@ package scala.tools.nsc
 package doc
 package model
 
+import scala.annotation.nowarn
 import scala.collection._
+import scala.tools.nsc.Reporting.WarningCategory
 
 /**
  * This trait finds implicit conversions for a class in the default scope and creates scaladoc entries for each of them.
@@ -30,10 +32,10 @@ import scala.collection._
  *
  *      class C extends B {
  *        def bar = 2
- *        class implicit
+ *        class D
  *      }
  *
- *      D def conv(a: A) = new C
+ *      implicit def conv(a: A) = new C
  *    }
  * }}}
  *
@@ -102,10 +104,10 @@ trait ModelFactoryImplicitSupport {
       // also keep empty conversions, so they appear in diagrams
       // conversions = conversions.filter(!_.members.isEmpty)
 
-      val hiddenConversions: Seq[String] = thisFactory
+      val hiddenConversions: Set[String] = thisFactory
         .comment(sym, inTpl.linkTarget, inTpl)
-        .map(_.hideImplicitConversions)
-        .getOrElse(Nil)
+        .map(_.hideImplicitConversions.toSet)
+        .getOrElse(Set.empty)
 
       conversions = conversions filterNot { conv: ImplicitConversionImpl =>
         hiddenConversions.contains(conv.conversionShortName) ||
@@ -200,8 +202,9 @@ trait ModelFactoryImplicitSupport {
 
           case global.analyzer.SilentResultValue(t: Tree) => t
           case global.analyzer.SilentTypeError(err) =>
-            global.reporter.warning(sym.pos, err.toString)
+            context.warning(sym.pos, err.toString, WarningCategory.Scaladoc)
             return Nil
+          case x => throw new MatchError(x)
         }
       }
 
@@ -435,7 +438,7 @@ trait ModelFactoryImplicitSupport {
   def makeShadowingTable(members: List[MemberImpl],
                          convs: List[ImplicitConversionImpl],
                          inTpl: DocTemplateImpl): Map[MemberEntity, ImplicitMemberShadowing] = {
-    assert(modelFinished)
+    assert(modelFinished, "cannot make shadowing table before model is finished")
 
     val shadowingTable = mutable.Map[MemberEntity, ImplicitMemberShadowing]()
     val membersByName: Map[Name, List[MemberImpl]] = members.groupBy(_.sym.name)
@@ -584,6 +587,7 @@ trait ModelFactoryImplicitSupport {
    * The trick here is that the resultType does not matter - the condition for removal it that paramss have the same
    * structure (A => B => C may not override (A, B) => C) and that all the types involved are
    * of the implicit conversion's member are subtypes of the parent members' parameters */
+  @nowarn("cat=lint-nonlocal-return")
   def isDistinguishableFrom(t1: Type, t2: Type): Boolean = {
     // Vlad: I tried using matches but it's not exactly what we need:
     // (p: AnyRef)AnyRef matches ((t: String)AnyRef returns false -- but we want that to be true

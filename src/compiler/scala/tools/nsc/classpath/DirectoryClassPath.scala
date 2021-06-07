@@ -14,8 +14,6 @@ package scala.tools.nsc.classpath
 
 import java.io.{Closeable, File}
 import java.net.URL
-import java.nio.file.{FileSystems, Files}
-import java.util
 
 import scala.reflect.io.{AbstractFile, PlainFile, PlainNioFile}
 import scala.tools.nsc.util.{ClassPath, ClassRepresentation, EfficientClassPath}
@@ -117,7 +115,7 @@ trait JFileDirectoryLookup[FileEntryType <: ClassRepresentation] extends Directo
     //
     // Note this behaviour can be enabled in javac with `javac -XDsortfiles`, but that's only
     // intended to improve determinism of the compiler for compiler hackers.
-    util.Arrays.sort(listing, (o1: File, o2: File) => o1.getName.compareTo(o2.getName))
+    java.util.Arrays.sort(listing, (o1: File, o2: File) => o1.getName.compareTo(o2.getName))
     listing
   }
   protected def getName(f: File): String = f.getName
@@ -141,7 +139,7 @@ object JrtClassPath {
       // even if we're running on a JRE or a non OpenJDK JDK where ct.sym is unavailable.
       //
       // Longer term we'd like an official API for this in the JDK
-      // Discussion: http://mail.openjdk.java.net/pipermail/compiler-dev/2018-March/thread.html#11738
+      // Discussion: https://mail.openjdk.java.net/pipermail/compiler-dev/2018-March/thread.html#11738
 
       val currentMajorVersion: Int = JDK9Reflectors.runtimeVersionMajor(JDK9Reflectors.runtimeVersion()).intValue()
       release match {
@@ -227,16 +225,16 @@ final class JrtClassPath(fs: java.nio.file.FileSystem) extends ClassPath with No
 }
 
 /**
-  * Implementation `ClassPath` based on the \$JAVA_HOME/lib/ct.sym backing http://openjdk.java.net/jeps/247
+  * Implementation `ClassPath` based on the \$JAVA_HOME/lib/ct.sym backing https://openjdk.java.net/jeps/247
   */
 final class CtSymClassPath(ctSym: java.nio.file.Path, release: Int) extends ClassPath with NoSourcePaths with Closeable {
   import java.nio.file.Path, java.nio.file._
 
-  private val fileSystem: FileSystem = FileSystems.newFileSystem(ctSym, null)
+  private val fileSystem: FileSystem = FileSystems.newFileSystem(ctSym, null: ClassLoader)
   private val root: Path = fileSystem.getRootDirectories.iterator.next
   private val roots = Files.newDirectoryStream(root).iterator.asScala.toList
 
-  // http://mail.openjdk.java.net/pipermail/compiler-dev/2018-March/011737.html
+  // https://mail.openjdk.java.net/pipermail/compiler-dev/2018-March/011737.html
   private def codeFor(major: Int): String = if (major < 10) major.toString else ('A' + (major - 10)).toChar.toString
 
   private val releaseCode: String = codeFor(release)

@@ -16,7 +16,7 @@ package analysis
 
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.annotation.{switch, tailrec}
+import scala.annotation.{ switch, tailrec }
 import scala.collection.immutable.BitSet
 import scala.collection.immutable.ArraySeq.unsafeWrapArray
 import scala.collection.mutable
@@ -25,12 +25,12 @@ import scala.reflect.internal.util.Position
 import scala.tools.asm
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
-import scala.tools.asm.{Handle, Opcodes, Type}
+import scala.tools.asm.{ Handle, Opcodes, Type }
 import scala.tools.nsc.backend.jvm.BTypes._
 import scala.tools.nsc.backend.jvm.GenBCode._
 import scala.tools.nsc.backend.jvm.analysis.BackendUtils._
 import scala.tools.nsc.backend.jvm.opt.BytecodeUtils._
-import scala.util.control.{NoStackTrace, NonFatal}
+import scala.util.control.{ NoStackTrace, NonFatal }
 
 /**
  * This component hosts tools and utilities used in the backend that require access to a `BTypes`
@@ -76,6 +76,11 @@ abstract class BackendUtils extends PerRunInit {
     case "10" => asm.Opcodes.V10
     case "11" => asm.Opcodes.V11
     case "12" => asm.Opcodes.V12
+    case "13" => asm.Opcodes.V13
+    case "14" => asm.Opcodes.V14
+    case "15" => asm.Opcodes.V15
+    case "16" => asm.Opcodes.V16
+    case "17" => asm.Opcodes.V17
     // to be continued...
   })
 
@@ -413,11 +418,12 @@ abstract class BackendUtils extends PerRunInit {
   }
   /**
    * Visit the class node and collect all referenced nested classes.
+   * @return (declaredInnerClasses, referredInnerClasses)
    */
-  def collectNestedClasses(classNode: ClassNode): List[ClassBType] = {
+  def collectNestedClasses(classNode: ClassNode): (List[ClassBType], List[ClassBType]) = {
     val c = new Collector
     c.visit(classNode)
-    c.innerClasses.toList
+    (c.declaredInnerClasses.toList, c.referredInnerClasses.toList)
   }
 
   /*
@@ -432,13 +438,15 @@ abstract class BackendUtils extends PerRunInit {
    *
    * can-multi-thread
    */
-  final def addInnerClasses(jclass: asm.ClassVisitor, refedInnerClasses: List[ClassBType]): Unit = {
-    val allNestedClasses = refedInnerClasses.flatMap(_.enclosingNestedClassesChain.get).distinct
-
+  final def addInnerClasses(jclass: asm.tree.ClassNode, declaredInnerClasses: List[ClassBType], refedInnerClasses: List[ClassBType]): Unit = {
     // sorting ensures nested classes are listed after their enclosing class thus satisfying the Eclipse Java compiler
-    for (nestedClass <- allNestedClasses.sortBy(_.internalName.toString)) {
+    val allNestedClasses = new mutable.TreeSet[ClassBType]()(Ordering.by(_.internalName))
+    allNestedClasses ++= declaredInnerClasses
+    refedInnerClasses.foreach(_.enclosingNestedClassesChain.get.foreach(allNestedClasses += _))
+
+    for (nestedClass <- allNestedClasses) {
       // Extract the innerClassEntry - we know it exists, enclosingNestedClassesChain only returns nested classes.
-      val Some(e) = nestedClass.innerClassAttributeEntry.get
+      val Some(e) = nestedClass.innerClassAttributeEntry.get: @unchecked
       jclass.visitInnerClass(e.name, e.outerName, e.innerName, e.flags)
     }
   }
@@ -479,6 +487,10 @@ abstract class BackendUtils extends PerRunInit {
   def indyLambdaBodyMethods(hostClass: InternalName, method: MethodNode): Map[InvokeDynamicInsnNode, Handle] = {
     onIndyLambdaImplMethodIfPresent(hostClass)(ms => ms.getOrElse(method, Nil).toMap).getOrElse(Map.empty)
   }
+
+  // not in `backendReporting` since there we don't have access to the `Callsite` class
+  def optimizerWarningSiteString(cs: callGraph.Callsite): String =
+    frontendAccess.backendReporting.siteString(cs.callsiteClass.internalName, cs.callsiteMethod.name)
 }
 
 object BackendUtils {
@@ -618,6 +630,16 @@ object BackendUtils {
     }
   }
 
+  def maxLocals(method: MethodNode): Int = {
+    computeMaxLocalsMaxStack(method)
+    method.maxLocals
+  }
+
+  def maxStack(method: MethodNode): Int = {
+    computeMaxLocalsMaxStack(method)
+    method.maxStack
+  }
+
   /**
    * In order to run an Analyzer, the maxLocals / maxStack fields need to be available. The ASM
    * framework only computes these values during bytecode generation.
@@ -663,8 +685,6 @@ object BackendUtils {
         r
       }
 
-      val subroutineRetTargets = new mutable.Stack[AbstractInsnNode]
-
       // for each instruction in the queue, contains the stack height at this instruction.
       // once an instruction has been treated, contains -1 to prevent re-enqueuing
       val stackHeights = new Array[Int](size)
@@ -686,6 +706,19 @@ object BackendUtils {
         enqInsn(tcb.handler, 1)
         if (maxStack == 0) maxStack = 1
       }
+
+      /* Subroutines are jumps, historically used for `finally` (https://www.artima.com/underthehood/finally.html)
+       *   - JSR pushes the return address (next instruction) on the stack and jumps to a label
+       *   - The subroutine typically saves the address to a local variable (ASTORE x)
+       *   - The subroutine typically jumps back to the return address using `RET x`, where `x` is the local variable
+       *
+       * However, the JVM spec does not require subroutines to `RET x` to their caller, they could return back to an
+       * outer subroutine caller (nested subroutines), or `RETURN`, or use a static jump. Static analysis of subroutines
+       * is therefore complex (https://www21.in.tum.de/~kleing/papers/KleinW-TPHOLS03.pdf).
+       *
+       * The asm.Analyzer however makes the assumption that subroutines only occur in the shape emitted by early
+       * javac, i.e., `RET` always returns to the next enclosing caller. So we do that as well.
+       */
 
       enq(0)
       while (top != -1) {
@@ -715,14 +748,14 @@ object BackendUtils {
 
           insn match {
             case j: JumpInsnNode =>
-              if (j.getOpcode == JSR) {
+              val opc = j.getOpcode
+              if (opc == JSR) {
                 val jsrTargetHeight = heightAfter + 1
                 if (jsrTargetHeight > maxStack) maxStack = jsrTargetHeight
-                subroutineRetTargets.push(j.getNext)
                 enqInsn(j.label, jsrTargetHeight)
+                enqInsnIndex(insnIndex + 1, heightAfter) // see subroutine shape assumption above
               } else {
                 enqInsn(j.label, heightAfter)
-                val opc = j.getOpcode
                 if (opc != GOTO) enqInsnIndex(insnIndex + 1, heightAfter) // jump is conditional, so the successor is also a possible control flow target
               }
 
@@ -741,11 +774,10 @@ object BackendUtils {
               enqInsn(t.dflt, heightAfter)
 
             case r: VarInsnNode if r.getOpcode == RET =>
-              enqInsn(subroutineRetTargets.pop(), heightAfter)
+              // the target is already enqueued, see subroutine shape assumption above
 
             case _ =>
-              val opc = insn.getOpcode
-              if (opc != ATHROW && !isReturn(insn))
+              if (insn.getOpcode != ATHROW && !isReturn(insn))
                 enqInsnIndex(insnIndex + 1, heightAfter)
           }
         }
@@ -759,7 +791,15 @@ object BackendUtils {
   }
 
   abstract class NestedClassesCollector[T](nestedOnly: Boolean) extends GenericSignatureVisitor(nestedOnly) {
-    val innerClasses = mutable.Set.empty[T]
+
+    val declaredInnerClasses = mutable.Set.empty[T]
+    val referredInnerClasses = mutable.Set.empty[T]
+
+    def innerClasses: collection.Set[T] = declaredInnerClasses ++ referredInnerClasses
+    def clear(): Unit = {
+      declaredInnerClasses.clear()
+      referredInnerClasses.clear()
+    }
 
     def declaredNestedClasses(internalName: InternalName): List[T]
 
@@ -767,7 +807,7 @@ object BackendUtils {
 
     def visit(classNode: ClassNode): Unit = {
       visitInternalName(classNode.name)
-      innerClasses ++= declaredNestedClasses(classNode.name)
+      declaredInnerClasses ++= declaredNestedClasses(classNode.name)
 
       visitInternalName(classNode.superName)
       classNode.interfaces.asScala foreach visitInternalName
@@ -826,7 +866,8 @@ object BackendUtils {
 
     def visitInternalName(internalName: String, offset: Int, length: Int): Unit = if (internalName != null && containsChar(internalName, offset, length, '$')) {
       for (c <- getClassIfNested(internalName.substring(offset, length)))
-        innerClasses += c
+        if (!declaredInnerClasses.contains(c))
+          referredInnerClasses += c
     }
 
     // either an internal/Name or [[Linternal/Name; -- there are certain references in classfiles

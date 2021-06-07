@@ -28,13 +28,13 @@ class ArrayOpsTest {
   }
 
   @Test
-  def reverseIterator: Unit = {
+  def reverseIterator(): Unit = {
     val a = Array(1,2,3)
     assertEquals(List(3,2,1), a.reverseIterator.toList)
   }
 
   @Test
-  def folds: Unit = {
+  def folds(): Unit = {
     val a = Array(1,2,3)
     assertEquals(6, a.foldLeft(0){ (a, b) => a+b })
     assertEquals(6, a.foldRight(0){ (a, b) => a+b })
@@ -78,7 +78,7 @@ class ArrayOpsTest {
   }
 
   @Test
-  def startsWith: Unit = {
+  def startsWith(): Unit = {
     val l0 = Nil
     val l1 = 1 :: Nil
     val a0 = Array[Int]()
@@ -105,14 +105,14 @@ class ArrayOpsTest {
   }
 
   @Test
-  def slice: Unit = {
+  def slice(): Unit = {
     assertArrayEquals(Array[Int](2), Array[Int](1, 2).slice(1, 2))
     assertArrayEquals(Array[Int](), Array[Int](1).slice(1052471512, -1496048404))
     assertArrayEquals(Array[Int](), Array[Int](1).slice(2, 3))
   }
 
   @Test
-  def copyToArrayOutOfBoundsTest: Unit = {
+  def copyToArrayOutOfBoundsTest(): Unit = {
     val target = Array[Int]()
     assertEquals(0, Array(1,2).copyToArray(target, 1, 0))
   }
@@ -121,5 +121,25 @@ class ArrayOpsTest {
   def t11499(): Unit = {
     val a: Array[Byte] = new Array[Byte](1000).sortWith { _ < _ }
     assertEquals(0, a(0))
+  }
+
+  @Test
+  def `empty intersection has correct component type for array`(): Unit = {
+    val something = Array(3.14)
+    val nothing   = Array[Double]()
+    val empty     = Array.empty[Double]
+
+    assertEquals(classOf[Double], nothing.intersect(something).getClass.getComponentType)
+    assertTrue(nothing.intersect(something).isEmpty)
+
+    assertEquals(classOf[Double], empty.intersect(something).getClass.getComponentType)
+    assertTrue(empty.intersect(something).isEmpty)
+    assertEquals(classOf[Double], empty.intersect(nothing).getClass.getComponentType)
+    assertTrue(empty.intersect(nothing).isEmpty)
+
+    assertEquals(classOf[Double], something.intersect(nothing).getClass.getComponentType)
+    assertTrue(something.intersect(nothing).isEmpty)
+    assertEquals(classOf[Double], something.intersect(empty).getClass.getComponentType)
+    assertTrue(something.intersect(empty).isEmpty)
   }
 }

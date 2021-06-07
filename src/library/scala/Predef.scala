@@ -23,10 +23,8 @@ import scala.annotation.meta.{ companionClass, companionMethod }
  *
  *  === Commonly Used Types ===
  *  Predef provides type aliases for types which are commonly used, such as
- *  the immutable collection types [[scala.collection.immutable.Map]],
- *  [[scala.collection.immutable.Set]], and the [[scala.collection.immutable.List]]
- *  constructors ([[scala.collection.immutable.::]] and
- *  [[scala.collection.immutable.Nil]]).
+ *  the immutable collection types [[scala.collection.immutable.Map]] and
+ *  [[scala.collection.immutable.Set]].
  *
  *  === Console Output ===
  *  For basic console output, `Predef` provides convenience methods [[print(x:Any* print]] and [[println(x:Any* println]],
@@ -89,9 +87,9 @@ import scala.annotation.meta.{ companionClass, companionMethod }
  * @groupprio implicit-classes-any 70
  * @groupdesc implicit-classes-any These implicit classes add useful extension methods to every type.
  *
- * @groupname implicit-classes-char CharSequence Conversions
- * @groupprio implicit-classes-char 80
- * @groupdesc implicit-classes-char These implicit classes add CharSequence methods to Array[Char] and IndexedSeq[Char] instances.
+ * @groupname char-sequence-wrappers CharSequence Wrappers
+ * @groupprio char-sequence-wrappers 80
+ * @groupdesc char-sequence-wrappers Wrappers that implements CharSequence and were implicit classes.
  *
  * @groupname conversions-java-to-anyval Java to Scala
  * @groupprio conversions-java-to-anyval 90
@@ -139,9 +137,8 @@ object Predef extends LowPriorityImplicits {
   @inline def valueOf[T](implicit vt: ValueOf[T]): T = vt.value
 
   /** The `String` type in Scala has all the methods of the underlying
-   *  `java.lang.String`, of which it is just an alias.
-   *  (See the documentation corresponding to your Java version,
-   *  for example [[http://docs.oracle.com/javase/8/docs/api/java/lang/String.html]].)
+   *  [[java.lang.String]], of which it is just an alias.
+   *
    *  In addition, extension methods in [[scala.collection.StringOps]]
    *  are added implicitly through the conversion [[augmentString]].
    *  @group aliases
@@ -382,20 +379,27 @@ object Predef extends LowPriorityImplicits {
     def +(other: String): String = String.valueOf(self) + other
   }
 
-  implicit final class SeqCharSequence(sequenceOfChars: scala.collection.IndexedSeq[Char]) extends CharSequence {
+  /** @group char-sequence-wrappers */
+  final class SeqCharSequence(sequenceOfChars: scala.collection.IndexedSeq[Char]) extends CharSequence {
     def length: Int                                     = sequenceOfChars.length
     def charAt(index: Int): Char                        = sequenceOfChars(index)
     def subSequence(start: Int, end: Int): CharSequence = new SeqCharSequence(sequenceOfChars.slice(start, end))
     override def toString                               = sequenceOfChars.mkString
   }
 
-  /** @group implicit-classes-char */
-  implicit final class ArrayCharSequence(arrayOfChars: Array[Char]) extends CharSequence {
+  /** @group char-sequence-wrappers */
+  def SeqCharSequence(sequenceOfChars: scala.collection.IndexedSeq[Char]): SeqCharSequence = new SeqCharSequence(sequenceOfChars)
+
+  /** @group char-sequence-wrappers */
+  final class ArrayCharSequence(arrayOfChars: Array[Char]) extends CharSequence {
     def length: Int                                     = arrayOfChars.length
     def charAt(index: Int): Char                        = arrayOfChars(index)
     def subSequence(start: Int, end: Int): CharSequence = new runtime.ArrayCharSequence(arrayOfChars, start, end)
     override def toString                               = arrayOfChars.mkString
   }
+
+  /** @group char-sequence-wrappers */
+  def ArrayCharSequence(arrayOfChars: Array[Char]): ArrayCharSequence = new ArrayCharSequence(arrayOfChars)
 
   /** @group conversions-string */
   @inline implicit def augmentString(x: String): StringOps = new StringOps(x)
@@ -430,7 +434,7 @@ object Predef extends LowPriorityImplicits {
    *  Consider using the [[scala.StringContext.f f interpolator]] as more type safe and idiomatic.
    *
    *  @param text the pattern for formatting the arguments.
-   *  @param args the arguments used to instantiating the pattern.
+   *  @param xs   the arguments used to instantiate the pattern.
    *  @throws java.lang.IllegalArgumentException if there was a problem with the format string or arguments
    *
    *  @see [[scala.StringContext.f StringContext.f]]
@@ -440,9 +444,9 @@ object Predef extends LowPriorityImplicits {
 
   // views --------------------------------------------------------------
 
-  @deprecated("Use xs.lazyZip(ys).", "2.13.0")
+  // these two are morally deprecated but the @deprecated annotation has been moved to the extension method themselves,
+  // in order to provide a more specific deprecation method.
   implicit def tuple2ToZippedOps[T1, T2](x: (T1, T2)): runtime.Tuple2Zipped.Ops[T1, T2]             = new runtime.Tuple2Zipped.Ops(x)
-  @deprecated("Use xs.lazyZip(ys).lazyZip(zs).", "2.13.0")
   implicit def tuple3ToZippedOps[T1, T2, T3](x: (T1, T2, T3)): runtime.Tuple3Zipped.Ops[T1, T2, T3] = new runtime.Tuple3Zipped.Ops(x)
 
   // Not specialized anymore since 2.13 but we still need separate methods

@@ -19,6 +19,7 @@ import java.{lang => jl}
 
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.{AnyStepper, DoubleStepper, Factory, SeqFactory, Stepper, StepperShape, mutable}
+import scala.language.implicitConversions
 
 /** A specialized Accumulator that holds `Double`s without boxing, see [[Accumulator]]. */
 final class DoubleAccumulator
@@ -107,7 +108,7 @@ final class DoubleAccumulator
           }
           else current
         pv = pv + index
-        x(x.length - 1) = pv
+        x(x.length - 1) = pv.toDouble // see comment on Accumulator.cumulative
         history(hIndex) = x
         hIndex += 1
       }
@@ -116,7 +117,7 @@ final class DoubleAccumulator
         pv = pv + cuml - prev
         prev = cuml
         val x = that.history(h)
-        x(x.length - 1) = pv
+        x(x.length - 1) = pv.toDouble // see comment on Accumulator.cumulative
         history(hIndex) = x
         h += 1
         hIndex += 1

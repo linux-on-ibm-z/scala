@@ -13,7 +13,7 @@
 package scala.reflect.internal
 package tpe
 
-import util.{ReusableInstance, StatisticsStatics}
+import util.ReusableInstance
 import Flags._
 import scala.runtime.Statics.releaseFence
 
@@ -35,26 +35,9 @@ trait FindMembers {
       this.excludedFlags = excludedFlags
       this.requiredFlags = requiredFlags
       initBaseClasses = tpe.baseClasses
-      _selectorClass = null
       _self = null
       _memberTypeHiCache = null
       _memberTypeHiCacheSym = null
-    }
-
-    // The first base class, or the symbol of the ThisType
-    // e.g in:
-    // trait T { self: C => }
-    //
-    // The selector class of `T.this.type` is `T`, and *not* the first base class, `C`.
-    private[this] var _selectorClass: Symbol = null
-    private def selectorClass: Symbol = {
-      if (_selectorClass eq null) {
-        _selectorClass = tpe match {
-          case tt: ThisType => tt.sym // scala/bug#7507 the first base class is not necessarily the selector class.
-          case _            => initBaseClasses.head
-        }
-      }
-      _selectorClass
     }
 
     // Cache for the narrowed type of `tp` (in `tp.findMember`).
@@ -68,19 +51,31 @@ trait FindMembers {
 
     // Main entry point
     def apply(): T = {
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(findMemberCount)
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, findMemberNanos) else null
+      if (settings.areStatisticsEnabled) statistics.incCounter(findMemberCount)
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, findMemberNanos) else null
       try searchConcreteThenDeferred
-      finally if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+      finally if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
     }
 
     protected def result: T
 
     // SLS 5.1.3 First, a concrete definition always overrides an abstract definition
     private def searchConcreteThenDeferred: T = {
-      val deferredSeen = walkBaseClasses(requiredFlags, excludedFlags | DEFERRED)
+      // The first base class, or the symbol of the ThisType
+      // e.g in:
+      // trait T { self: C => }
+      //
+      // The selector class of `T.this.type` is `T`, and *not* the first base class, `C`.
+      val selectorClass = tpe match {
+        case tt: ThisType => tt.sym // scala/bug#7507 the first base class is not necessarily the selector class.
+        case _            => initBaseClasses match {
+          case Nil => NoSymbol // tpe might have been NoPrefix
+          case xs => xs.head
+        }
+      }
+      val deferredSeen = walkBaseClasses(selectorClass, requiredFlags, excludedFlags | DEFERRED)
       if (deferredSeen) // OPT: the `if` avoids a second pass if the first pass didn't spot any candidates.
-        walkBaseClasses(requiredFlags | DEFERRED, excludedFlags & ~(DEFERRED.toLong))
+        walkBaseClasses(selectorClass, requiredFlags | DEFERRED, excludedFlags & ~(DEFERRED.toLong))
       result
     }
 
@@ -92,7 +87,7 @@ trait FindMembers {
      * @return if a potential deferred member was seen on the first pass that calls for a second pass,
                and `excluded & DEFERRED != 0L`
      */
-    private def walkBaseClasses(required: Long, excluded: Long): Boolean = {
+    private def walkBaseClasses(selectorClass: Symbol, required: Long, excluded: Long): Boolean = {
       var bcs = initBaseClasses
 
       // Have we seen a candidate deferred member?
@@ -107,18 +102,25 @@ trait FindMembers {
 
       val findAll = name == nme.ANYname
 
+      val phaseFlagMask = phase.flagMask
+      val fastFlags = (phaseFlagMask & ~InitialFlags) == 0
+
       while (!bcs.isEmpty) {
         val currentBaseClass = bcs.head
         val decls = currentBaseClass.info.decls
         var entry = if (findAll) decls.elems else decls.lookupEntry(name)
         while (entry ne null) {
           val sym = entry.sym
-          val flags = sym.flags
+          val flags =
+            if (fastFlags)
+              sym.rawflags & phaseFlagMask
+            else
+              sym.flags(phaseFlagMask)
           val meetsRequirements = (flags & required) == required
           if (meetsRequirements) {
             val excl: Long = flags & excluded
             val isExcluded: Boolean = excl != 0L
-            if (!isExcluded && isPotentialMember(sym, flags, currentBaseClass, seenFirstNonRefinementClass, refinementClasses)) {
+            if (!isExcluded && isPotentialMember(sym, flags, selectorClass, currentBaseClass, seenFirstNonRefinementClass, refinementClasses)) {
               if (shortCircuit(sym)) return false
               else addMemberIfNew(sym)
             } else if (excl == DEFERRED) {
@@ -154,7 +156,7 @@ trait FindMembers {
     //
     // Q. When does a potential member fail to be an actual member?
     // A. if it is subsumed by an member in a subclass.
-    private def isPotentialMember(sym: Symbol, flags: Long, owner: Symbol,
+    private def isPotentialMember(sym: Symbol, flags: Long, selectorClass: Symbol, owner: Symbol,
                                   seenFirstNonRefinementClass: Boolean, refinementClasses: List[Symbol]): Boolean = {
       // conservatively (performance wise) doing this with flags masks rather than `sym.isPrivate`
       // to avoid multiple calls to `Symbol#flags`.
@@ -166,11 +168,11 @@ trait FindMembers {
           // private[this] only a member from within the selector class.
           // (Optimization only? Does the spec back this up?)
         !isPrivateLocal && ( !seenFirstNonRefinementClass ||
-          refinementClasses.exists(_.info.parents.exists(_.typeSymbol == owner))
+          refinementClasses.exists(_.info.parents.exists(_.typeSymbol eq owner))
         )
 
-      (!sym.isClassConstructor || owner == initBaseClasses.head) &&
-        (!isPrivate || owner == selectorClass || admitPrivate)
+      (!sym.isClassConstructor || (owner eq initBaseClasses.head)) &&
+        (!isPrivate || (owner eq selectorClass) || admitPrivate)
     }
 
     // True unless the already-found member of type `memberType` matches the candidate symbol `other`.
@@ -240,7 +242,7 @@ trait FindMembers {
       if (isNew) members.enter(sym)
     }
   }
-  private[reflect] val findMemberInstance: ReusableInstance[FindMember] = new ReusableInstance(() => new FindMember, enabled = isCompilerUniverse)
+  private[reflect] val findMemberInstance: ReusableInstance[FindMember] = ReusableInstance(new FindMember, enabled = isCompilerUniverse)
 
   private[reflect] final class FindMember
     extends FindMemberBase[Symbol] {
@@ -314,11 +316,11 @@ trait FindMembers {
     // Assemble the result from the hand-rolled ListBuffer
     protected def result: Symbol = if (members eq null) {
       if (member0 == NoSymbol) {
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(noMemberCount)
+        if (settings.areStatisticsEnabled) statistics.incCounter(noMemberCount)
         NoSymbol
       } else member0
     } else {
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(multMemberCount)
+      if (settings.areStatisticsEnabled) statistics.incCounter(multMemberCount)
       lastM.next = Nil
       releaseFence()
       initBaseClasses.head.newOverloaded(tpe, members)

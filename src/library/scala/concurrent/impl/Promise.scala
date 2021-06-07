@@ -11,16 +11,16 @@
  */
 
 package scala.concurrent.impl
-import scala.concurrent.{Batchable, ExecutionContext, CanAwait, TimeoutException, ExecutionException, Future, OnCompleteRunnable}
+import scala.concurrent.{Batchable, CanAwait, ExecutionContext, ExecutionException, Future, TimeoutException}
 import scala.concurrent.duration.Duration
-import scala.annotation.{tailrec, switch}
-import scala.util.control.{NonFatal, ControlThrowable}
-import scala.util.{Try, Success, Failure}
+import scala.annotation.{nowarn, switch, tailrec}
+import scala.util.control.{ControlThrowable, NonFatal}
+import scala.util.{Failure, Success, Try}
 import scala.runtime.NonLocalReturnControl
 import java.util.concurrent.locks.AbstractQueuedSynchronizer
-import java.util.concurrent.atomic.{AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 import java.util.Objects.requireNonNull
-import java.io.{NotSerializableException, IOException, ObjectInputStream, ObjectOutputStream}
+import java.io.{IOException, NotSerializableException, ObjectInputStream, ObjectOutputStream}
 
 /**
   * Latch used to implement waiting on a DefaultPromise's result.
@@ -28,7 +28,7 @@ import java.io.{NotSerializableException, IOException, ObjectInputStream, Object
   * Inspired by: http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/src/main/java/util/concurrent/locks/AbstractQueuedSynchronizer.java
   * Written by Doug Lea with assistance from members of JCP JSR-166
   * Expert Group and released to the public domain, as explained at
-  * http://creativecommons.org/publicdomain/zero/1.0/
+  * https://creativecommons.org/publicdomain/zero/1.0/
   */
 private[impl] final class CompletionLatch[T] extends AbstractQueuedSynchronizer with (Try[T] => Unit) {
   //@volatie not needed since we use acquire/release
@@ -377,8 +377,9 @@ private[concurrent] object Promise {
     private[this] final var _ec: ExecutionContext,
     private[this] final var _arg: Try[F],
     private[this] final val _xform: Int
-  ) extends DefaultPromise[T]() with Callbacks[F] with Runnable with Batchable with OnCompleteRunnable {
-    final def this(xform: Int, f: _ => _, ec: ExecutionContext) = this(f.asInstanceOf[Any => Any], ec.prepare(), null, xform)
+  ) extends DefaultPromise[T]() with Callbacks[F] with Runnable with Batchable {
+    final def this(xform: Int, f: _ => _, ec: ExecutionContext) =
+      this(f.asInstanceOf[Any => Any], ec.prepare(): @nowarn("cat=deprecation"), null, xform)
 
     final def benefitsFromBatching: Boolean = _xform != Xform_onComplete && _xform != Xform_foreach
 

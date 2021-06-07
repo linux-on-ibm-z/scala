@@ -12,7 +12,7 @@
 
 package scala.collection
 
-import scala.annotation.implicitNotFound
+import scala.annotation.{implicitNotFound, nowarn}
 import scala.annotation.unchecked.uncheckedVariance
 
 /** Base type of sorted sets */
@@ -24,7 +24,25 @@ trait SortedSet[A] extends Set[A]
 
   def sortedIterableFactory: SortedIterableFactory[SortedSet] = SortedSet
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix: String = "SortedSet"
+
+  override def equals(that: Any): Boolean = that match {
+    case _ if this eq that.asInstanceOf[AnyRef] => true
+    case ss: SortedSet[A] if ss.ordering == this.ordering =>
+      (ss canEqual this) &&
+        (this.size == ss.size) && {
+        val i1 = this.iterator
+        val i2 = ss.iterator
+        var allEqual = true
+        while (allEqual && i1.hasNext)
+          allEqual = ordering.equiv(i1.next(), i2.next())
+        allEqual
+      }
+    case _ =>
+      super.equals(that)
+  }
+
 }
 
 trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]

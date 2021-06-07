@@ -2,15 +2,12 @@ package scala
 package tools.nsc
 package reporters
 
-import java.io.{ByteArrayOutputStream, StringReader, BufferedReader, PrintStream, PrintWriter}
+import java.io.{ByteArrayOutputStream, StringReader, BufferedReader, PrintWriter}
 import org.junit.Assert._
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 
 import scala.reflect.internal.util._
 
-@RunWith(classOf[JUnit4])
 class ConsoleReporterTest {
   val source = "Test_ConsoleReporter"
   val batchFile = new BatchSourceFile(source, "For testing".toList)
@@ -44,12 +41,12 @@ class ConsoleReporterTest {
       test(pos)
       val buf = writerOut.toString
       if (msg.isEmpty && severity.isEmpty) assertTrue(s"Expected no message output but saw: [$buf]", buf.isEmpty)
-      else if (!pos.isDefined) assertEquals(severity + msg, buf.linesIterator.next)
+      else if (!pos.isDefined) assertEquals(severity + msg, buf.linesIterator.next())
       else {
         val it = buf.linesIterator
-        assertEquals(source + ":1: " + severity + msg, it.next)
-        assertEquals(content, it.next)
-        assertEquals("    ^", it.next)
+        assertEquals(source + ":1: " + severity + msg, it.next())
+        assertEquals(content, it.next())
+        assertEquals("    ^", it.next())
       }
     } finally writerOut.reset()
 
@@ -64,7 +61,7 @@ class ConsoleReporterTest {
   def echoTest(): Unit = {
     val reporter = createConsoleReporter("r", writerOut, echoWriterOut)
     reporter.echo("Hello World!")
-    assertEquals("Hello World!", echoWriterOut.toString.linesIterator.next)
+    assertEquals("Hello World!", echoWriterOut.toString.linesIterator.next())
 
     /** Check with constructor which has the same writer and echoWriter */
     val reporter2 = createConsoleReporter("r", writerOut)
@@ -147,8 +144,8 @@ class ConsoleReporterTest {
     val reporter = createConsoleReporter("s", writerOut, echoWriterOut)
     reporter.displayPrompt()
     val it = writerOut.toString.linesIterator
-    assertTrue(it.next.isEmpty)
-    assertEquals(output + "java.lang.Throwable", it.next)
+    assertTrue(it.next().isEmpty)
+    assertEquals(output + "java.lang.Throwable", it.next())
     assertTrue(it.hasNext)
 
     /** Check for no stack trace */
@@ -156,8 +153,8 @@ class ConsoleReporterTest {
     val reporter2 = createConsoleReporter("w", writerOut2)
     reporter2.displayPrompt()
     val it2 = writerOut2.toString.linesIterator
-    assertTrue(it2.next.isEmpty)
-    assertEquals(output, it2.next)
+    assertTrue(it2.next().isEmpty)
+    assertEquals(output, it2.next())
     assertFalse(it2.hasNext)
 
     /** Check for no stack trace */
@@ -165,8 +162,8 @@ class ConsoleReporterTest {
     val reporter3 = createConsoleReporter("r", writerOut3)
     reporter3.displayPrompt()
     val it3 = writerOut3.toString.linesIterator
-    assertTrue(it3.next.isEmpty)
-    assertEquals(output, it3.next)
+    assertTrue(it3.next().isEmpty)
+    assertEquals(output, it3.next())
     assertFalse(it3.hasNext)
   }
 
@@ -211,6 +208,7 @@ class ConsoleReporterTest {
     testHelper(msg = "")(filter.error(_, "Testing display for maxerrs to fail"))
   }
 
+  @deprecated("Tests deprecated API", since="2.13")
   @Test
   def filteredInfoTest(): Unit = {
     val reporter = new FilteringReporter {

@@ -13,9 +13,7 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.reflect.internal.util.StatisticsStatics
-
-/** The main attribution phase.
+/** Defines the sub-components for the namer, packageobjects, and typer phases.
  */
 trait Analyzer extends AnyRef
             with Contexts
@@ -47,9 +45,7 @@ trait Analyzer extends AnyRef
       override val checkable = false
       override def keepsTypeParams = false
 
-      def apply(unit: CompilationUnit): Unit = {
-        newNamer(rootContext(unit)).enterSym(unit.body)
-      }
+      def apply(unit: CompilationUnit): Unit = newNamer(rootContext(unit)).enterSym(unit.body)
     }
   }
 
@@ -91,13 +87,14 @@ trait Analyzer extends AnyRef
     def newPhase(prev: Phase): StdPhase = new TyperPhase(prev)
     final class TyperPhase(prev: Phase) extends StdPhase(prev) {
       override def keepsTypeParams = false
+      override def shouldSkipThisPhaseForJava: Boolean = !(settings.YpickleJava || createJavadoc)
       resetTyper()
       // the log accumulates entries over time, even though it should not (Adriaan, Martin said so).
       // Lacking a better fix, we clear it here (before the phase is created, meaning for each
       // compiler run). This is good enough for the resident compiler, which was the most affected.
       undoLog.clear()
       override def run(): Unit = {
-        val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.typerNanos) else null
+        val start = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.typerNanos) else null
         global.echoPhaseSummary(this)
         val units = currentRun.units
         while (units.hasNext) {
@@ -107,13 +104,14 @@ trait Analyzer extends AnyRef
         finishComputeParamAlias()
         // defensive measure in case the bookkeeping in deferred macro expansion is buggy
         clearDelayed()
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.typerNanos, start)
+        if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.typerNanos, start)
       }
       def apply(unit: CompilationUnit): Unit = {
         try {
           val typer = newTyper(rootContext(unit))
           unit.body = typer.typed(unit.body)
-          if (!settings.Youtline.value) {
+          // interactive typed may finish by throwing a `TyperResult`
+          if (!settings.Youtline) {
             for (workItem <- unit.toCheck) workItem()
             if (settings.warnUnusedImport)
               warnUnusedImports(unit)
@@ -122,6 +120,7 @@ trait Analyzer extends AnyRef
           }
         }
         finally {
+          runReporting.reportSuspendedMessages(unit)
           unit.toCheck.clear()
         }
       }

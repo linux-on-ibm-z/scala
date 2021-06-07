@@ -304,7 +304,7 @@ trait EntityPage extends HtmlPage {
              memsDiv("package members", "Package Members", packageMembers, "packages")
           ++ memsDiv("members", "Instance Constructors", constructors, "constructors")
           ++ memsDiv("types members", "Type Members", typeMembers, "types")
-          ++ memsDiv("types members", "Deprecated Type Members", deprTypeMembers)
+          ++ memsDiv("types members", "Deprecated Type Members", deprTypeMembers, "deprecatedTypes")
           ++ memsDiv("values members", "Abstract Value Members", absValueMembers)
           ++ memsDiv("values members", if (absValueMembers.isEmpty) "Value Members" else "Concrete Value Members", concValueMembers)
           ++ memsDiv("values members", "Shadowed Implicit Value Members", shadowedImplicitMembers)
@@ -341,7 +341,7 @@ trait EntityPage extends HtmlPage {
     val postamble =
       List(Div(id = "tooltip"),
            if (Set("epfl", "EPFL").contains(tpl.universe.settings.docfooter.value))
-             Div(id = "footer", elems = Txt("Scala programming documentation. Copyright (c) 2002-2019 ") :: A(href = "http://www.epfl.ch", target = "_top", elems = Txt("EPFL")) :: Txt(" and ") :: A(href = "http://www.lightbend.com", target = "_top", elems = Txt("Lightbend")) :: Txt("."))
+             Div(id = "footer", elems = Txt("Scala programming documentation. Copyright (c) 2002-2021 ") :: A(href = "https://www.epfl.ch", target = "_top", elems = Txt("EPFL")) :: Txt(" and ") :: A(href = "https://www.lightbend.com", target = "_top", elems = Txt("Lightbend")) :: Txt("."))
            else
              Div(id = "footer", elems = Txt(tpl.universe.settings.docfooter.value)))
 
@@ -361,10 +361,14 @@ trait EntityPage extends HtmlPage {
     indentation: Int = 0
   ): Elems = {
     // Sometimes it's same, do we need signatureCompat still?
-    val sig = if (mbr.signature == mbr.signatureCompat) {
-      A(id= mbr.signature) :: NoElems
-    } else {
-      A(id= mbr.signature) :: A(id= mbr.signatureCompat) :: NoElems
+    val sig = {
+      val anchorToMember = "anchorToMember"
+
+      if (mbr.signature == mbr.signatureCompat) {
+        A(id= mbr.signature, `class` = anchorToMember) :: NoElems
+      } else {
+        A(id= mbr.signature, `class` = anchorToMember) :: A(id= mbr.signatureCompat, `class` = anchorToMember) :: NoElems
+      }
     }
 
     val memberComment = memberToCommentHtml(mbr, inTpl, isSelf = false)
@@ -463,8 +467,9 @@ trait EntityPage extends HtmlPage {
 
       mbr.comment.fold(NoElems) { comment =>
         val cmtedPrs = prs filter {
-          case tp: TypeParam => comment.typeParams isDefinedAt tp.name
+          case tp: TypeParam  => comment.typeParams isDefinedAt tp.name
           case vp: ValueParam => comment.valueParams isDefinedAt vp.name
+          case x              => throw new MatchError(x)
         }
         if (cmtedPrs.isEmpty && comment.result.isEmpty) NoElems
         else {
@@ -504,7 +509,7 @@ trait EntityPage extends HtmlPage {
             case constraints =>
               Br :: Txt("This conversion will take place only if all of the following constraints are met:") :: Br :: {
                 var index = 0
-                constraints flatMap { constraint => Txt({ index += 1; index } + ". ") :: (constraintToHtml(constraint) :+ Br) }
+                constraints flatMap { constraint => Txt("" + { index += 1; index } + ". ") :: (constraintToHtml(constraint) :+ Br) }
               }
           }
 
@@ -523,7 +528,7 @@ trait EntityPage extends HtmlPage {
                 case _      => "" // no parameters
               }
               Br ++ Txt("To access this member you can use a ") ++
-              A(href="http://stackoverflow.com/questions/2087250/what-is-the-purpose-of-type-ascription-in-scala",
+              A(href="https://stackoverflow.com/questions/2087250/what-is-the-purpose-of-type-ascription-in-scala",
                 target="_blank", elems= Txt("type ascription")) ++ Txt(":") ++
               Br ++ Div(`class`="cmt", elems=Pre(Txt(s"(${EntityPage.lowerFirstLetter(tpl.name)}: ${conv.targetType.name}).${mbr.name}$params")))
             }
@@ -956,6 +961,7 @@ trait EntityPage extends HtmlPage {
             val anchor = "#" + mbr.signature
             val link = relativeLinkTo(mbr.inTemplate)
             myXml ++= Span(`class`="name", elems= A(href=link + anchor, elems= Txt(str.substring(from, to))))
+          case x => throw new MatchError(x)
         }
         index = to
       }
@@ -993,7 +999,7 @@ trait EntityPage extends HtmlPage {
 
   private def blockToStr(block: comment.Block): String = block match {
     case comment.Paragraph(in) => Page.inlineToStr(in)
-    case _ => block.toString
+    case _                     => block.toString
   }
 
   private def constraintToHtml(constraint: Constraint): Elems = constraint match {
@@ -1002,7 +1008,7 @@ trait EntityPage extends HtmlPage {
         templateToHtml(ktcc.typeClassEntity) ++ Txt(")")
     case tcc: TypeClassConstraint =>
       Txt(tcc.typeParamName + " is ") ++
-        A(href="http://stackoverflow.com/questions/2982276/what-is-a-context-bound-in-scala", target="_blank", elems=
+        A(href="https://stackoverflow.com/questions/2982276/what-is-a-context-bound-in-scala", target="_blank", elems=
         Txt("context-bounded")) ++ Txt(" by " + tcc.typeClassEntity.qualifiedName + " (" + tcc.typeParamName + ": ") ++
         templateToHtml(tcc.typeClassEntity) ++ Txt(")")
     case impl: ImplicitInScopeConstraint =>

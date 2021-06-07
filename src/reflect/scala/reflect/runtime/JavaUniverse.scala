@@ -14,10 +14,10 @@ package scala
 package reflect
 package runtime
 
-import scala.reflect.internal.{TreeInfo, SomePhase}
+import scala.annotation.nowarn
+import scala.reflect.internal.{SomePhase, TreeInfo}
 import scala.reflect.internal.{SymbolTable => InternalSymbolTable}
 import scala.reflect.runtime.{SymbolTable => RuntimeSymbolTable}
-import scala.reflect.internal.util.Statistics
 import scala.reflect.api.{TypeCreator, Universe}
 import scala.reflect.internal.util.Statistics
 
@@ -45,7 +45,7 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
   // minimal Run to get Reporting wired
   def currentRun = new RunReporting {}
   class PerRunReporting extends PerRunReportingBase {
-    def deprecationWarning(pos: Position, msg: String, since: String): Unit = reporter.warning(pos, msg)
+    def deprecationWarning(pos: Position, msg: String, since: String, site: String, origin: String): Unit = reporter.warning(pos, msg)
   }
   protected def PerRunReporting = new PerRunReporting
 
@@ -86,6 +86,7 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
   }
 
   // can't put this in runtime.Trees since that's mixed with Global in ReflectGlobal, which has the definition from internal.Trees
+  @nowarn("cat=deprecation&msg=early initializers")
   object treeInfo extends {
     val global: JavaUniverse.this.type = JavaUniverse.this
   } with TreeInfo
@@ -153,7 +154,7 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
   def init(): Unit = {
     definitions.init()
 
-    // workaround for http://groups.google.com/group/scala-internals/browse_thread/thread/97840ba4fd37b52e
+    // workaround for https://groups.google.com/group/scala-internals/browse_thread/thread/97840ba4fd37b52e
     // constructors are by definition single-threaded, so we initialize all lazy vals (and local object) in advance
     // in order to avoid deadlocks later (e.g. one thread holds a global reflection lock and waits for definitions.Something to initialize,
     // whereas another thread holds a definitions.Something initialization lock and needs a global reflection lock to complete the initialization)

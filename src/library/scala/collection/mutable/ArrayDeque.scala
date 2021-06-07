@@ -14,8 +14,7 @@ package scala
 package collection
 package mutable
 
-import java.util.NoSuchElementException
-
+import scala.annotation.nowarn
 import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializable
 import scala.reflect.ClassTag
@@ -104,7 +103,7 @@ class ArrayDeque[A] protected (
     val it = elems.iterator
     if (it.nonEmpty) {
       val n = length
-      // The following code resizes the current collection atmost once and traverses elems atmost twice
+      // The following code resizes the current collection at most once and traverses elems at most twice
       elems.knownSize match {
         // Size is too expensive to compute AND we can traverse it only once - can't do much but retry with an IndexedSeq
         case srcLength if srcLength < 0 => prependAll(it.to(IndexedSeq: Factory[A, IndexedSeq[A]] /* type ascription needed by Dotty */))
@@ -514,6 +513,7 @@ class ArrayDeque[A] protected (
     reset(array = array2, start = 0, end = n)
   }
 
+  @nowarn("""cat=deprecation&origin=scala\.collection\.Iterable\.stringPrefix""")
   override protected[this] def stringPrefix = "ArrayDeque"
 }
 
@@ -529,14 +529,9 @@ object ArrayDeque extends StrictOptimizedSeqFactory[ArrayDeque] {
     val s = coll.knownSize
     if (s >= 0) {
       val array = alloc(s)
-      val it = coll.iterator
-      var i = 0
-      while (it.hasNext) {
-        array(i) = it.next().asInstanceOf[AnyRef]
-        i += 1
-      }
+      IterableOnce.copyElemsToArray(coll, array.asInstanceOf[Array[Any]])
       new ArrayDeque[B](array, start = 0, end = s)
-    } else empty[B] ++= coll
+    } else new ArrayDeque[B]() ++= coll
   }
 
   def newBuilder[A]: Builder[A, ArrayDeque[A]] =
@@ -556,7 +551,7 @@ object ArrayDeque extends StrictOptimizedSeqFactory[ArrayDeque] {
   private[ArrayDeque] final val StableSize = 128
 
   /**
-    * Allocates an array whose size is next power of 2 > $len
+    * Allocates an array whose size is next power of 2 > `len`
     * Largest possible len is 1<<30 - 1
     *
     * @param len

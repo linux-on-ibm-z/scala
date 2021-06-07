@@ -88,7 +88,7 @@ trait GenTypes {
 
       val tagFlavor = if (concrete) tpnme.TypeTag.toString else tpnme.WeakTypeTag.toString
       // if this fails, it might produce the dreaded "erroneous or inaccessible type" error
-      // to find out the whereabouts of the error run scalac with -Ydebug
+      // to find out the whereabouts of the error run scalac with -Vdebug
       if (reifyDebug) println("launching implicit search for %s.%s[%s]".format(universe, tagFlavor, tpe))
       val result =
         typer.resolveTypeTag(defaultErrorPosition, universe.tpe, tpe, concrete = concrete, allowMaterialization = false) match {
@@ -136,7 +136,7 @@ trait GenTypes {
     val result = typer.silent(silentTyper => silentTyper.context.withMacrosDisabled(searchForManifest(silentTyper)))
     result match {
       case analyzer.SilentResultValue(result) => result
-      case analyzer.SilentTypeError(_) => EmptyTree
+      case _: analyzer.SilentTypeError        => EmptyTree
     }
   }
 
@@ -167,6 +167,7 @@ trait GenTypes {
   private def reifySemiConcreteTypeMember(tpe: Type): Tree = tpe match {
     case tpe @ TypeRef(pre @ SingleType(prepre, presym), sym, args) if sym.isAbstractType && !sym.isExistential =>
       mirrorBuildCall(nme.TypeRef, reify(pre), mirrorBuildCall(nme.selectType, reify(sym.owner), reify(sym.name.toString)), reify(args))
+    case x => throw new MatchError(x)
   }
 
   /** Reify an annotated type, i.e. the one that makes us deal with AnnotationInfos */

@@ -41,14 +41,15 @@
 /.idea
 /.settings
 
+# vscode
+/.vscode
+
 # Standard symbolic link to build/quick/bin
 /qbin
 
 # sbt's target directories
 /target/
-/project/target/
-/project/project/target/
-/project/project/project/target/
+/project/**/target/
 /test/macro-annot/target/
 /test/files/target/
 /test/target/
@@ -56,6 +57,11 @@
 local.sbt
 jitwatch.out
 
+# Used by the restarr/restarrFull commands as target directories
+/build-restarr/
+/target-restarr/
+
 # metals
 .metals
 .bloop
+project/**/metals.sbt

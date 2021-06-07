@@ -13,11 +13,11 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.collection.mutable.ListBuffer
-import scala.collection.{immutable, mutable}
+import scala.collection.{immutable, mutable}, mutable.ListBuffer
+import scala.reflect.internal.Depth
 import scala.util.control.ControlThrowable
 import symtab.Flags._
-import scala.reflect.internal.Depth
+import scala.tools.nsc.Reporting.WarningCategory
 
 /** This trait contains methods related to type parameter inference.
  *
@@ -239,7 +239,7 @@ trait Infer extends Checkable {
 
     // When filtering sym down to the accessible alternatives leaves us empty handed.
     private def checkAccessibleError(tree: Tree, sym: Symbol, pre: Type, site: Tree): Tree = {
-      if (settings.debug) {
+      if (settings.isDebug) {
         Console.println(context)
         Console.println(tree)
         Console.println("" + pre + " " + sym.owner + " " + context.owner + " " + context.outer.enclClass.owner + " " + sym.owner.thisType + (pre =:= sym.owner.thisType))
@@ -290,8 +290,7 @@ trait Infer extends Checkable {
         case NoSymbol if sym.isJavaDefined && context.unit.isJava => sym  // don't try to second guess Java; see #4402
         case sym1                                                 => sym1
       }
-      // XXX So... what's this for exactly?
-      if (context.unit.exists)
+      if (context.unit.exists && settings.YtrackDependencies.value)
         context.unit.registerDependency(sym.enclosingTopLevelClass)
 
       if (sym.isError)
@@ -415,7 +414,7 @@ trait Infer extends Checkable {
       if (if (useWeaklyCompatible) isWeaklyCompatible(resTpVars, pt) else isCompatible(resTpVars, pt)) {
         // If conforms has just solved a tvar as a singleton type against pt, then we need to
         // prevent it from being widened later by adjustTypeArgs
-        tvars.foreach(_.constr.stopWideningIfPrecluded)
+        tvars.foreach(_.constr.stopWideningIfPrecluded())
 
         // If the restpe is an implicit method, and the expected type is fully defined
         // optimize type variables wrt to the implicit formals only; ignore the result type.
@@ -589,8 +588,18 @@ trait Infer extends Checkable {
         // ...or lower bound of a type param, since they're asking for it.
         var checked, warning = false
         def checkForAny(): Unit = {
-          val collector = new ContainsAnyCollector(topTypes)
-          @`inline` def containsAny(t: Type) = t.dealiasWidenChain.exists(collector.collect)
+          val collector = new ContainsAnyCollector(topTypes) {
+            val seen = mutable.Set.empty[Type]
+            override def apply(t: Type): Unit = {
+              def saw(dw: Type): Unit =
+                if (!result && !seen(dw)) {
+                  seen += dw
+                  if (!dw.typeSymbol.isRefinementClass) super.apply(dw)
+                }
+              if (!result && !seen(t)) t.dealiasWidenChain.foreach(saw)
+            }
+          }
+          @`inline` def containsAny(t: Type) = collector.collect(t)
           val hasAny = containsAny(pt) || containsAny(restpe) ||
             formals.exists(containsAny) ||
             argtpes.exists(containsAny) ||
@@ -599,7 +608,7 @@ trait Infer extends Checkable {
           warning = !hasAny
         }
         def canWarnAboutAny = { if (!checked) checkForAny() ; warning }
-        targs.foreach(targ => if (topTypes.contains(targ.typeSymbol) && canWarnAboutAny) reporter.warning(fn.pos, s"a type was inferred to be `${targ.typeSymbol.name}`; this may indicate a programming error."))
+        targs.foreach(targ => if (topTypes.contains(targ.typeSymbol) && canWarnAboutAny) context.warning(fn.pos, s"a type was inferred to be `${targ.typeSymbol.name}`; this may indicate a programming error.", WarningCategory.LintInferAny))
       }
       adjustTypeArgs(tparams, tvars, targs, restpe)
     }
@@ -895,7 +904,7 @@ trait Infer extends Checkable {
       case _                         =>
         tpe2 match {
           case PolyType(tparams2, rtpe2) => isAsSpecificValueType(tpe1, rtpe2, undef1, undef2 ::: tparams2)
-          case _ if !currentRun.isScala300 => existentialAbstraction(undef1, tpe1) <:< existentialAbstraction(undef2, tpe2)
+          case _ if !currentRun.isScala3 => existentialAbstraction(undef1, tpe1) <:< existentialAbstraction(undef2, tpe2)
           case _                         =>
             // Backport of fix for https://github.com/scala/bug/issues/2509
             // from Dotty https://github.com/lampepfl/dotty/commit/89540268e6c49fb92b9ca61249e46bb59981bf5a
@@ -1097,6 +1106,7 @@ trait Infer extends Checkable {
         catch ifNoInstance { msg =>
           NoMethodInstanceError(fn, args, msg); List()
         }
+      case x => throw new MatchError(x)
     }
 
     /** Substitute free type variables `undetparams` of type constructor
@@ -1483,7 +1493,7 @@ trait Infer extends Checkable {
       // with pt = WildcardType if it fails with pt != WildcardType.
       val c = context
       class InferMethodAlternativeTwice extends c.TryTwice {
-        private[this] val OverloadedType(pre, alts) = tree.tpe
+        private[this] val OverloadedType(pre, alts) = tree.tpe: @unchecked
         private[this] var varargsStar = false
         private[this] val argtpes = argtpes0 mapConserve {
           case RepeatedType(tp) => varargsStar = true ; tp
@@ -1522,7 +1532,7 @@ trait Infer extends Checkable {
      *  If no such polymorphic alternative exist, error.
      */
     def inferPolyAlternatives(tree: Tree, argtypes: List[Type]): Unit = {
-      val OverloadedType(pre, alts) = tree.tpe
+      val OverloadedType(pre, alts) = tree.tpe: @unchecked
       // Alternatives with a matching length type parameter list
       val matchingLength   = tree.symbol filter (alt => sameLength(alt.typeParams, argtypes))
       def allMonoAlts      = alts forall (_.typeParams.isEmpty)
@@ -1548,9 +1558,13 @@ trait Infer extends Checkable {
           finish(sym setInfo tpe, tpe)
       }
       matchingLength.alternatives match {
-        case Nil        => fail()
+        case Nil => fail()
         case alt :: Nil => finish(alt, pre memberType alt)
-        case _          => checkWithinBounds(matchingLength filter (alt => isWithinBounds(pre, alt.owner, alt.typeParams, argtypes)))
+        case _ =>
+          checkWithinBounds(matchingLength.filter { alt =>
+            isWithinBounds(pre, alt.owner, alt.typeParams, argtypes) &&
+              kindsConform(alt.typeParams, argtypes, pre, alt.owner)
+          })
       }
     }
   }

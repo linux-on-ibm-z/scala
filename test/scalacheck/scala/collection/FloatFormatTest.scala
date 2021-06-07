@@ -81,8 +81,7 @@ object FloatFormatTest extends Properties("FloatFormat") {
         10 -> right
       ))
     
-    import scala.collection.JavaConverters._
-
+    import scala.jdk.CollectionConverters._
     Gen.sequence(bogoparts).map(_.asScala.mkString)
   }
 

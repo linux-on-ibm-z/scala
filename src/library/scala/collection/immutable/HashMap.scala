@@ -22,6 +22,7 @@ import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializable
 import scala.collection.mutable.ReusableBuilder
 import scala.collection.{Iterator, MapFactory, MapFactoryDefaults, Stepper, StepperShape, mutable}
+import scala.runtime.AbstractFunction2
 import scala.runtime.Statics.releaseFence
 import scala.util.hashing.MurmurHash3
 
@@ -54,9 +55,9 @@ final class HashMap[K, +V] private[immutable] (private[immutable] val rootNode: 
 
   override def isEmpty: Boolean = rootNode.size == 0
 
-  override def keySet: Set[K] = if (size == 0) Set.empty else new KeySet
+  override def keySet: Set[K] = if (size == 0) Set.empty else new HashKeySet
 
-  private final class KeySet extends ImmutableKeySet {
+  private final class HashKeySet extends ImmutableKeySet {
 
     private[this] def newKeySetOrThis(newHashMap: HashMap[K, _]): Set[K] =
       if (newHashMap eq HashMap.this) this else newHashMap.keySet
@@ -161,7 +162,13 @@ final class HashMap[K, +V] private[immutable] (private[immutable] val rootNode: 
   }
 
   override def concat[V1 >: V](that: scala.IterableOnce[(K, V1)]): HashMap[K, V1] = that match {
-    case hm: HashMap[K, V1] => newHashMapOrThis(rootNode.concat(hm.rootNode, 0))
+    case hm: HashMap[K, V1] =>
+      if (isEmpty) hm
+      else {
+        val newNode = rootNode.concat(hm.rootNode, 0)
+        if (newNode eq hm.rootNode) hm
+        else newHashMapOrThis(rootNode.concat(hm.rootNode, 0))
+      }
     case hm: collection.mutable.HashMap[K, V] =>
       val iter = hm.nodeIterator
       var current = rootNode
@@ -184,35 +191,50 @@ final class HashMap[K, +V] private[immutable] (private[immutable] val rootNode: 
       }
       this
     case _ =>
-      val iter = that.iterator
-      var current: BitmapIndexedMapNode[K, V1] = rootNode
-      while (iter.hasNext) {
-        val (key, value) = iter.next()
-        val originalHash = key.##
-        val improved = improve(originalHash)
-        current = current.updated(key, value, originalHash, improved, 0, replaceValue = true)
-
-        if (current ne rootNode) {
-          // Note: We could have started with shallowlyMutableNodeMap = 0, however this way, in the case that
-          // the first changed key ended up in a subnode beneath root, we mark that root right away as being
-          // shallowly mutable.
-          //
-          // since key->value has just been inserted, and certainly caused a new root node to be created, we can say with
-          // certainty that it either caused a new subnode to be created underneath `current`, in which case we should
-          // carry on mutating that subnode, or it ended up as a child data pair of the root, in which case, no harm is
-          // done by including its bit position in the shallowlyMutableNodeMap anyways.
-          var shallowlyMutableNodeMap = Node.bitposFrom(Node.maskFrom(improved, 0))
-
-          while (iter.hasNext) {
-            val (key, value) = iter.next()
-            val originalHash = key.##
-            val improved = improve(originalHash)
+      class accum extends AbstractFunction2[K, V1, Unit] with Function1[(K, V1), Unit] {
+        var changed = false
+        var shallowlyMutableNodeMap: Int = 0
+        var current: BitmapIndexedMapNode[K, V1] = rootNode
+        def apply(kv: (K, V1)) = apply(kv._1, kv._2)
+        def apply(key: K, value: V1): Unit = {
+          val originalHash = key.##
+          val improved = improve(originalHash)
+          if (!changed) {
+            current = current.updated(key, value, originalHash, improved, 0, replaceValue = true)
+            if (current ne rootNode) {
+              // Note: We could have started with shallowlyMutableNodeMap = 0, however this way, in the case that
+              // the first changed key ended up in a subnode beneath root, we mark that root right away as being
+              // shallowly mutable.
+              //
+              // since key->value has just been inserted, and certainly caused a new root node to be created, we can say with
+              // certainty that it either caused a new subnode to be created underneath `current`, in which case we should
+              // carry on mutating that subnode, or it ended up as a child data pair of the root, in which case, no harm is
+              // done by including its bit position in the shallowlyMutableNodeMap anyways.
+              changed = true
+              shallowlyMutableNodeMap = Node.bitposFrom(Node.maskFrom(improved, 0))
+            }
+          } else {
             shallowlyMutableNodeMap = current.updateWithShallowMutations(key, value, originalHash, improved, 0, shallowlyMutableNodeMap)
           }
-          return new HashMap(current)
         }
       }
-      this
+      that match {
+        case thatMap: Map[K, V1] =>
+          if (thatMap.isEmpty) this
+          else {
+            val accum = new accum
+            thatMap.foreachEntry(accum)
+            newHashMapOrThis(accum.current)
+          }
+        case _ =>
+          val it = that.iterator
+          if (it.isEmpty) this
+          else {
+            val accum = new accum
+            it.foreach(accum)
+            newHashMapOrThis(accum.current)
+          }
+      }
   }
 
   override def tail: HashMap[K, V] = this - head._1
@@ -232,7 +254,7 @@ final class HashMap[K, +V] private[immutable] (private[immutable] val rootNode: 
 
   override def equals(that: Any): Boolean =
     that match {
-      case map: HashMap[K, V] => (this eq map) || (this.rootNode == map.rootNode)
+      case map: HashMap[_, _] => (this eq map) || (this.rootNode == map.rootNode)
       case _ => super.equals(that)
     }
 
@@ -606,11 +628,11 @@ private final class BitmapIndexedMapNode[K, +V](
 
     if ((dataMap & bitpos) != 0) {
       val index = indexFrom(dataMap, mask, bitpos)
-      if (key == getKey(index)) getValue(index) else throw new NoSuchElementException
+      if (key == getKey(index)) getValue(index) else throw new NoSuchElementException(s"key not found: $key")
     } else if ((nodeMap & bitpos) != 0) {
       getNode(indexFrom(nodeMap, mask, bitpos)).apply(key, originalHash, keyHash, shift + BitPartitionSize)
     } else {
-      throw new NoSuchElementException
+      throw new NoSuchElementException(s"key not found: $key")
     }
   }
 
@@ -2331,6 +2353,8 @@ private[immutable] final class HashMapBuilder[K, V] extends ReusableBuilder[(K, 
           val hash = improve(originalHash)
           update(rootNode, next.key, next.value, originalHash, hash, 0)
         }
+      case thatMap: Map[K, V] =>
+        thatMap.foreachEntry((key, value) => addOne(key, value))
       case other =>
         val it = other.iterator
         while(it.hasNext) addOne(it.next())

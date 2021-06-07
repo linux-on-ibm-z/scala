@@ -1,13 +1,11 @@
 package scala.collection
 
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
 import org.junit.Assert._
 import org.junit.Test
 
-@RunWith(classOf[JUnit4])
 class MapTest {
-  @Test def test: Unit = {
+  @deprecated("Tests deprecated API", since="2.13")
+  @Test def test(): Unit = {
     val map = collection.Map(
       1 -> 1,
       2 -> 2,
@@ -38,25 +36,27 @@ class MapTest {
       "foo [1 -> 1, 2 -> 2] bar")
   }
 
+  @deprecated("Tests deprecated API", since="2.13")
   @Test def t11188(): Unit = {
     import scala.collection.immutable.ListMap
     val m = ListMap(1 -> "one")
     val mm = Map(2 -> "two") ++: m
     assert(mm.isInstanceOf[ListMap[Int,String]])
-    assertEquals(mm.mkString("[", ", ", "]"), "[1 -> one, 2 -> two]")
+    assertEquals(mm.mkString("[", ", ", "]"), "[2 -> two, 1 -> one]")
   }
 
+  @deprecated("Tests deprecated API", since="2.13")
   @Test def deprecatedPPE(): Unit = {
     val m = (1 to 10).map(x => (x, x)).toMap
     val m1 = m ++: m
     assertEquals(m.toList.sorted, (m1: Map[Int, Int]).toList.sorted)
-    val s1 = List(1) ++: m
-    assertEquals(1 :: m.toList.sorted, (s1: Iterable[Any]).toList.sortBy({case (x: Int, _) => x; case x: Int => x}))
+    val s1: Iterable[Any] = List(1) ++: m
+    assertEquals(1 :: m.toList.sorted, s1.toList.sortBy { case (x: Int, _) => x ; case x: Int => x })
   }
 
   @Test
   def flatMapOption(): Unit = {
-    def f(p: (Int, Int)) = if (p._1 < p._2) Some(p._1, p._2) else None
+    def f(p: (Int, Int)) = if (p._1 < p._2) Some((p._1, p._2)) else None
     val m = (1 to 10).zip(11 to 20).toMap
     val m2 = m.flatMap(f)
     (m2: Map[Int, Int]).head
@@ -66,6 +66,7 @@ class MapTest {
     (m4: Iterable[Int]).head
   }
 
+  @deprecated("Tests deprecated API", since="2.13")
   @Test
   def t11589(): Unit = {
     // tests the strictness of Map#values
@@ -122,4 +123,9 @@ class MapTest {
     check(mutable.CollisionProofHashMap(1 -> 1))
   }
 
+  @Test
+  def t12228(): Unit = {
+    assertFalse(Set("") == immutable.BitSet(1))
+    assertFalse(Map("" -> 2) == scala.collection.immutable.LongMap(1L -> 2))
+  }
 }

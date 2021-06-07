@@ -23,12 +23,11 @@ import scala.language.existentials
 import scala.annotation.elidable
 import scala.tools.util.PathResolver.Defaults
 import scala.collection.mutable
-import scala.reflect.internal.util.StringContextStripMarginOps
+import scala.reflect.internal.util.{ StatisticsStatics, StringContextStripMarginOps }
 import scala.tools.nsc.util.DefaultJarFactory
+import scala.util.chaining._
 
-
-trait ScalaSettings extends StandardScalaSettings with Warnings {
-  self: MutableSettings =>
+trait ScalaSettings extends StandardScalaSettings with Warnings { _: MutableSettings =>
 
   /** Set of settings */
   protected[scala] lazy val allSettings = mutable.LinkedHashMap[String, Setting]()
@@ -57,10 +56,11 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
    *  Standard settings
    */
   // argfiles is only for the help message
-  /*val argfiles = */ BooleanSetting    ("@<file>", "A text file containing compiler arguments (options and source files)")
-  val classpath     = PathSetting       ("-classpath", "Specify where to find user class files.", defaultClasspath) withAbbreviation "-cp" withAbbreviation "--class-path"
-  val d             = OutputSetting     (outputDirs, ".")
-  val nospecialization = BooleanSetting ("-no-specialization", "Ignore @specialize annotations.") withAbbreviation "--no-specialization"
+  /*val argfiles = */ BooleanSetting("@<file>", "A text file containing compiler arguments (options and source files)")
+  val classpath     = PathSetting   ("-classpath", "Specify where to find user class files.", defaultClasspath) withAbbreviation "-cp" withAbbreviation "--class-path"
+  val outdir        = OutputSetting (".").withPostSetHook(s => try outputDirs.setSingleOutput(s.value) catch { case FatalError(msg) => errorFn(msg) }).tap(_.postSetHook())
+
+  val nospecialization = BooleanSetting("-no-specialization", "Ignore @specialize annotations.") withAbbreviation "--no-specialization"
 
   // Would be nice to build this dynamically from scala.languageFeature.
   // The two requirements: delay error checking until you have symbols, and let compiler command build option-specific help.
@@ -92,25 +92,13 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   } withAbbreviation "--release"
   def releaseValue: Option[String] = Option(release.value).filter(_ != "")
 
-  /*
-   * The previous "-source" option is intended to be used mainly
-   * though this helper.
-   */
-  private[this] val version212 = ScalaVersion("2.12.0")
-  def isScala212: Boolean = source.value >= version212
-  private[this] val version213 = ScalaVersion("2.13.0")
-  def isScala213: Boolean = source.value >= version213
-  private[this] val version214 = ScalaVersion("2.14.0")
-  def isScala214: Boolean = source.value >= version214
-  private[this] val version300 = ScalaVersion("3.0.0")
-  def isScala300: Boolean = source.value >= version300
-
   /**
    * -X "Advanced" settings
    */
   val Xhelp              = BooleanSetting      ("-X", "Print a synopsis of advanced options.")
+  val async              = BooleanSetting      ("-Xasync", "Enable the async phase for scala.async.Async.{async,await}.")
   val checkInit          = BooleanSetting      ("-Xcheckinit", "Wrap field accessors to throw an exception on uninitialized access.")
-  val developer          = BooleanSetting      ("-Xdev", "Issue warnings about anything which seems amiss in compiler internals. Intended for compiler developers")
+  val developer          = BooleanSetting      ("-Xdev", "Issue warnings about anything which seems amiss in compiler internals. Intended for compiler developers").withPostSetHook(s => if (s.value) StatisticsStatics.enableDeveloperAndDeoptimize())
   val noassertions       = BooleanSetting      ("-Xdisable-assertions", "Generate no assertions or assumptions.") andThen (flag =>
                                                 if (flag) elidebelow.value = elidable.ASSERTION + 1)
   val elidebelow         = IntSetting          ("-Xelide-below", "Calls to @elidable methods are omitted if method priority is lower than argument",
@@ -120,8 +108,19 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val maxerrs            = IntSetting          ("-Xmaxerrs", "Maximum errors to print", 100, None, _ => None)
   val maxwarns           = IntSetting          ("-Xmaxwarns", "Maximum warnings to print", 100, None, _ => None)
   val Xmigration         = ScalaVersionSetting ("-Xmigration", "version", "Warn about constructs whose behavior may have changed since version.", initial = NoScalaVersion, default = Some(AnyScalaVersion))
-  val nouescape          = BooleanSetting      ("-Xno-uescape", "Disable handling of \\u unicode escapes.")
   val Xnojline           = BooleanSetting      ("-Xnojline", "Do not use JLine for editing.")
+    .withDeprecationMessage("Replaced by -Xjline:off")
+    .withPostSetHook(_ => Xjline.value = "off")
+  val Xjline             = ChoiceSetting       (
+    name    = "-Xjline",
+    helpArg = "mode",
+    descr   = "Select JLine mode.",
+    choices = List("emacs", "vi", "off"),
+    default = "emacs",
+    choicesHelp = List(
+      "emacs key bindings.",
+      "vi key bindings",
+      "No JLine editing."))
   val Xverify            = BooleanSetting      ("-Xverify", "Verify generic signatures in generated bytecode.")
   val plugin             = MultiStringSetting  ("-Xplugin", "paths", "Load a plugin from each classpath.")
   val disable            = MultiStringSetting  ("-Xplugin-disable", "plugin", "Disable plugins by name.")
@@ -130,11 +129,20 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val pluginsDir         = StringSetting       ("-Xpluginsdir", "path", "Path to search for plugin archives.", Defaults.scalaPluginPath)
   val prompt             = BooleanSetting      ("-Xprompt", "Display a prompt after each error (debugging option).")
   val resident           = BooleanSetting      ("-Xresident", "Compiler stays resident: read source filenames from standard input.")
-  val script             = StringSetting       ("-Xscript", "object", "Treat the source file as a script and wrap it in a main method.", "")
+  val script             = StringSetting       ("-Xscript", "object", "Treat the source file as a script and wrap it in a main method.", "Main")
   val mainClass          = StringSetting       ("-Xmain-class", "path", "Class for manifest's Main-Class entry (only useful with -d <jar>)", "")
   val sourceReader       = StringSetting       ("-Xsource-reader", "classname", "Specify a custom method for reading source files.", "")
   val reporter           = StringSetting       ("-Xreporter", "classname", "Specify a custom subclass of FilteringReporter for compiler messages.", "scala.tools.nsc.reporters.ConsoleReporter")
-  val source             = ScalaVersionSetting ("-Xsource", "version", "Treat compiler input as Scala source for the specified version, see scala/bug#8126.", initial = ScalaVersion("2.13"))
+  val source             = ScalaVersionSetting ("-Xsource", "version", "Enable features that will be available in a future version of Scala, for purposes of early migration and alpha testing.", initial = ScalaVersion("2.13")).withPostSetHook { s =>
+    if (s.value >= ScalaVersion("3"))
+      isScala3.value = true
+    else if (s.value >= ScalaVersion("2.14"))
+      s.withDeprecationMessage("instead of -Xsource:2.14, use -Xsource:3").value = ScalaVersion("3")
+    else if (s.value < ScalaVersion("2.13"))
+      errorFn.apply(s"-Xsource must be at least the current major version (${ScalaVersion("2.13").versionString})")
+  }
+  val isScala3           = BooleanSetting      ("isScala3", "Is -Xsource Scala 3?").internalOnly()
+  // The previous "-Xsource" option is intended to be used mainly though ^ helper
 
   val XnoPatmatAnalysis = BooleanSetting ("-Xno-patmat-analysis", "Don't perform exhaustivity/unreachability analysis. Also, ignore @switch annotation.")
 
@@ -154,6 +162,8 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
     def isAtLeastJunit = isTruthy || XmixinForceForwarders.value == "junit"
   }
 
+  val nonStrictPatmatAnalysis = BooleanSetting("-Xnon-strict-patmat-analysis", "Disable strict exhaustivity analysis, which assumes guards are false and refutable extractors don't match")
+
   // XML parsing options
   object XxmlSettings extends MultiChoiceEnumeration {
     val coalescing   = Choice("coalescing", "Convert PCData to Text and coalesce sibling nodes")
@@ -172,7 +182,8 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   def debuginfo = g
   def dependenciesFile = dependencyfile
   def nowarnings = nowarn
-  def outdir = d
+  @deprecated("Use outdir instead.", since="2.13.2")
+  def d = outdir
   def printLate = print
 
   /**
@@ -236,24 +247,28 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val Ydumpclasses    = StringSetting     ("-Ydump-classes", "dir", "Dump the generated bytecode to .class files (useful for reflective compilation that utilizes in-memory classloaders).", "")
   val stopAfter       = PhasesSetting     ("-Ystop-after", "Stop after") withAbbreviation ("-stop") // backward compat
   val stopBefore      = PhasesSetting     ("-Ystop-before", "Stop before")
-  val Yrangepos       = BooleanSetting    ("-Yrangepos", "Use range positions for syntax trees.")
+  val Yrangepos       = BooleanSetting    ("-Yrangepos", "Use range positions for syntax trees.", true)
   val Yvalidatepos    = PhasesSetting     ("-Yvalidate-pos", s"Validate positions after the given phases (implies ${Yrangepos.name})") withPostSetHook (_ => Yrangepos.value = true)
   val Yreifycopypaste = BooleanSetting    ("-Yreify-copypaste", "Dump the reified trees in copypasteable representation.")
   val Ymacroexpand    = ChoiceSetting     ("-Ymacro-expand", "policy", "Control expansion of macros, useful for scaladoc and presentation compiler.", List(MacroExpand.Normal, MacroExpand.None, MacroExpand.Discard), MacroExpand.Normal)
   val YmacroFresh     = BooleanSetting    ("-Ymacro-global-fresh-names", "Should fresh names in macros be unique across all compilation units")
   val YmacroAnnotations = BooleanSetting  ("-Ymacro-annotations", "Enable support for macro annotations, formerly in macro paradise.")
-  val Yreplclassbased = BooleanSetting    ("-Yrepl-class-based", "Use classes to wrap REPL snippets instead of objects")
-  val YreplMagicImport = BooleanSetting    ("-Yrepl-use-magic-imports", "In the code the wraps REPL snippes, use magic imports to rather than nesting wrapper object/classes")
+  val YtastyNoAnnotations = BooleanSetting("-Ytasty-no-annotations", "Disable support for reading annotations from TASTy, this will prevent safety features such as pattern match exhaustivity and reachability analysis.")
+  val YtastyReader        = BooleanSetting("-Ytasty-reader", "Enable support for reading Scala 3's TASTy files, allowing consumption of libraries compiled with Scala 3 (provided they don't use any Scala 3 only features).")
+  val Yreplclassbased = BooleanSetting    ("-Yrepl-class-based", "Use classes to wrap REPL snippets instead of objects", default = true)
+  val YreplMagicImport = BooleanSetting   ("-Yrepl-use-magic-imports", "In the code that wraps REPL snippets, use magic imports rather than nesting wrapper object/classes", default = true)
   val Yreploutdir     = StringSetting     ("-Yrepl-outdir", "path", "Write repl-generated classfiles to given output directory (use \"\" to generate a temporary dir)" , "")
   @deprecated("Unused setting will be removed", since="2.13")
-  val Yreplsync       = new BooleanSetting    ("-Yrepl-sync", "Legacy setting for sbt compatibility, unused.").internalOnly()
+  val Yreplsync       = new BooleanSetting    ("-Yrepl-sync", "Legacy setting for sbt compatibility, unused.", default = false).internalOnly()
   val Yscriptrunner   = StringSetting     ("-Yscriptrunner", "classname", "Specify a scala.tools.nsc.ScriptRunner (default, resident, shutdown, or a class name).", "default")
-  val YdisableFlatCpCaching  = BooleanSetting    ("-Yno-flat-classpath-cache", "Do not cache flat classpath representation of classpath elements from jars across compiler instances.") withAbbreviation "-YdisableFlatCpCaching"
+  val YdisableFlatCpCaching  = BooleanSetting    ("-Yno-flat-classpath-cache", "Do not cache flat classpath representation of classpath elements from jars across compiler instances.").withAbbreviation("-YdisableFlatCpCaching")
+  // Zinc adds YdisableFlatCpCaching automatically for straight-to-JAR compilation, this is a way to override that choice.
+  val YforceFlatCpCaching  = BooleanSetting    ("-Yforce-flat-cp-cache", "Force caching flat classpath representation of classpath elements from jars across compiler instances. Has precedence over: " + YdisableFlatCpCaching.name).internalOnly()
   val YcachePluginClassLoader  = CachePolicy.setting("plugin", "compiler plugins")
   val YcacheMacroClassLoader   = CachePolicy.setting("macro", "macros")
   val YmacroClasspath = PathSetting       ("-Ymacro-classpath", "The classpath used to reflectively load macro implementations, default is the compilation classpath.", "")
 
-  val Youtline        = BooleanSetting    ("-Youtline", "Don't compile method bodies. Use together with `-Ystop-afer:pickler to generate the pickled signatures for all source files.").internalOnly()
+  val Youtline        = BooleanSetting    ("-Youtline", "Don't compile method bodies. Use together with `-Ystop-after:pickler` to generate the pickled signatures for all source files.").internalOnly()
 
   val exposeEmptyPackage = BooleanSetting ("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
   val Ydelambdafy        = ChoiceSetting  ("-Ydelambdafy", "strategy", "Strategy used for translating lambdas into JVM code.", List("inline", "method"), "method")
@@ -266,6 +281,8 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
     Deflater.DEFAULT_COMPRESSION, Some((Deflater.DEFAULT_COMPRESSION,Deflater.BEST_COMPRESSION)), (x: String) => None)
   val YpickleJava = BooleanSetting("-Ypickle-java", "Pickler phase should compute pickles for .java defined symbols for use by build tools").internalOnly()
   val YpickleWrite = StringSetting("-Ypickle-write", "directory|jar", "destination for generated .sig files containing type signatures.", "", None).internalOnly()
+  val YpickleWriteApiOnly = BooleanSetting("-Ypickle-write-api-only", "Exclude private members (other than those material to subclass compilation, such as private trait vals) from generated .sig files containing type signatures.").internalOnly()
+  val YtrackDependencies = BooleanSetting("-Ytrack-dependencies", "Record references to in unit.depends. Deprecated feature that supports SBT 0.13 with incOptions.withNameHashing(false) only.", default = true)
 
   sealed abstract class CachePolicy(val name: String, val help: String)
   object CachePolicy {
@@ -274,7 +291,7 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
     object LastModified extends CachePolicy("last-modified", "Cache class loader, using file last-modified time to invalidate")
     object Always extends CachePolicy("always", "Cache class loader with no invalidation")
     // TODO Jorge to add new policy. Think about whether there is a benefit to the user on offering this as a separate policy or unifying with the previous one.
-    // object ZipMetadata extends CachePolicy("zip-metadata", "Cache classloade, using file last-modified time, then ZIP file metadata to invalidate")
+    // object ZipMetadata extends CachePolicy("zip-metadata", "Cache classloader, using file last-modified time, then ZIP file metadata to invalidate")
     def values: List[CachePolicy] = List(None, LastModified, Always)
   }
 
@@ -323,7 +340,7 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val opt = MultiChoiceSetting(
     name = "-opt",
     helpArg = "optimization",
-    descr = "Enable optimizations",
+    descr = "Enable optimizations, `help` for details.",
     domain = optChoices,
   )
 
@@ -398,11 +415,15 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val optWarnings = MultiChoiceSetting(
     name = "-opt-warnings",
     helpArg = "warning",
-    descr = "Enable optimizer warnings",
+    descr = "Enable optimizer warnings, `help` for details.",
     domain = optWarningsChoices,
-    default = Some(List(optWarningsChoices.atInlineFailed.name)))
+    default = Some(List(optWarningsChoices.atInlineFailed.name))) withPostSetHook { _ =>
+    // no need to set `Wconf` to `silent` if optWarnings is none, since no warnings are reported
+    if (optWarningsSummaryOnly) Wconf.tryToSet(List(s"cat=optimizer:ws"))
+    else Wconf.tryToSet(List(s"cat=optimizer:w"))
+  }
 
-  def optWarningsSummaryOnly = optWarnings.value subsetOf Set(optWarningsChoices.none, optWarningsChoices.atInlineFailedSummary)
+  def optWarningsSummaryOnly: Boolean = optWarnings.value subsetOf Set(optWarningsChoices.none, optWarningsChoices.atInlineFailedSummary)
 
   def optWarningEmitAtInlineFailed =
     !optWarnings.isSetByUser ||
@@ -432,7 +453,8 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
    */
   val Vhelp              = BooleanSetting("-V", "Print a synopsis of verbose options.")
   val browse          = PhasesSetting("-Vbrowse", "Browse the abstract syntax tree after") withAbbreviation "-Ybrowse"
-  val debug           = BooleanSetting("-Vdebug", "Increase the quantity of debugging output.") withAbbreviation "-Ydebug"
+  val debug           = BooleanSetting("-Vdebug", "Increase the quantity of debugging output.") withAbbreviation "-Ydebug" withPostSetHook (s => if (s.value) StatisticsStatics.enableDebugAndDeoptimize())
+  val YdebugTasty      = BooleanSetting("-Vdebug-tasty", "Increase the quantity of debugging output when unpickling tasty.") withAbbreviation "-Ydebug-tasty"
   val Ydocdebug          = BooleanSetting("-Vdoc", "Trace scaladoc activity.") withAbbreviation "-Ydoc-debug"
   val Yidedebug          = BooleanSetting("-Vide", "Generate, validate and output trees using the interactive compiler.") withAbbreviation "-Yide-debug"
   val Yissuedebug        = BooleanSetting("-Vissue", "Print stack traces when a context issues an error.") withAbbreviation "-Yissue-debug"
@@ -474,13 +496,15 @@ trait ScalaSettings extends StandardScalaSettings with Warnings {
   val Ystatistics = PhasesSetting("-Vstatistics", "Print compiler statistics for specific phases", "parser,typer,patmat,erasure,cleanup,jvm")
     .withPostSetHook(s => YstatisticsEnabled.value = s.value.nonEmpty)
     .withAbbreviation("-Ystatistics")
-  val YstatisticsEnabled = BooleanSetting("-Ystatistics-enabled", "Internal setting, indicating that statistics are enabled for some phase.").internalOnly()
+  val YstatisticsEnabled = BooleanSetting("-Ystatistics-enabled", "Internal setting, indicating that statistics are enabled for some phase.").internalOnly().withPostSetHook(s => if (s) StatisticsStatics.enableColdStatsAndDeoptimize())
   val YhotStatisticsEnabled = BooleanSetting("-Vhot-statistics", s"Enable `${Ystatistics.name}` to also print hot statistics.")
-    .withAbbreviation("-Yhot-statistics")
+    .withAbbreviation("-Yhot-statistics").withPostSetHook(s => if (s && YstatisticsEnabled) StatisticsStatics.enableHotStatsAndDeoptimize())
   val Yshowsyms       = BooleanSetting("-Vsymbols", "Print the AST symbol hierarchy after each phase.") withAbbreviation "-Yshow-syms"
   val Ytyperdebug        = BooleanSetting("-Vtyper", "Trace type assignments.") withAbbreviation "-Ytyper-debug"
-  val XlogImplicits      = BooleanSetting("-Vimplicits", "Show more detail on why some implicits are not applicable.")
-    .withAbbreviation("-Xlog-implicits")
+  val Vimplicits            = BooleanSetting("-Vimplicits", "Print dependent missing implicits.").withAbbreviation("-Xlog-implicits")
+  val VimplicitsVerboseTree = BooleanSetting("-Vimplicits-verbose-tree", "Display all intermediate implicits in a chain.")
+  val VimplicitsMaxRefined  = IntSetting("-Vimplicits-max-refined", "max chars for printing refined types, abbreviate to `F {...}`", Int.MaxValue, Some((0, Int.MaxValue)), _ => None)
+  val VtypeDiffs            = BooleanSetting("-Vtype-diffs", "Print found/required error messages as colored diffs.")
   val logImplicitConv    = BooleanSetting("-Vimplicit-conversions", "Print a message whenever an implicit conversion is inserted.")
     .withAbbreviation("-Xlog-implicit-conversions")
   val logReflectiveCalls = BooleanSetting("-Vreflective-calls", "Print a message when a reflective method call is generated")

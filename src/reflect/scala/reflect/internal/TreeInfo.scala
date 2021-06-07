@@ -18,6 +18,10 @@ import Flags._
 import scala.annotation.tailrec
 
 abstract class TreeInfo {
+  // FIXME: With `global` as a `val`, implementers must use early initializers, which
+  //        are deprecated and will not be supported in 3.0. Please change the design,
+  //        remove the early initializers from implementers, and then remove the
+  //        `@nowarn` annotations from implementers.
   val global: SymbolTable
 
   import global._
@@ -111,6 +115,7 @@ abstract class TreeInfo {
       case Apply(Select(free @ Ident(_), nme.apply), _) if free.symbol.name endsWith nme.REIFY_FREE_VALUE_SUFFIX =>
         // see a detailed explanation of this trick in `GenSymbols.reifyFreeTerm`
         free.symbol.hasStableFlag && isPath(free, allowVolatile)
+      case Literal(_)      => true // scala/bug#8855
       case _               => false
     }
 
@@ -333,7 +338,7 @@ abstract class TreeInfo {
   /** Is tree a self constructor call this(...)? I.e. a call to a constructor of the
    *  same object?
    */
-  def isSelfConstrCall(tree: Tree): Boolean = dissectApplied(tree).core match {
+  def isSelfConstrCall(tree: Tree): Boolean = dissectCore(tree) match {
     case Ident(nme.CONSTRUCTOR)           => true
     case Select(This(_), nme.CONSTRUCTOR) => true
     case _                                => false
@@ -341,7 +346,7 @@ abstract class TreeInfo {
 
   /** Is tree a super constructor call?
    */
-  def isSuperConstrCall(tree: Tree): Boolean = dissectApplied(tree).core match {
+  def isSuperConstrCall(tree: Tree): Boolean = dissectCore(tree) match {
     case Select(Super(_, _), nme.CONSTRUCTOR) => true
     case _                                    => false
   }
@@ -494,18 +499,15 @@ abstract class TreeInfo {
 
     def recoverBody(body: List[Tree]) = body map {
       case vd @ ValDef(vmods, vname, _, vrhs) if nme.isLocalName(vname) =>
-        tbody find {
-          case dd: DefDef => dd.name == vname.dropLocal
-          case _ => false
-        } map { dd =>
-          val DefDef(dmods, dname, _, _, _, drhs) = dd
-          // get access flags from DefDef
-          val defDefMask = Flags.AccessFlags | OVERRIDE | IMPLICIT | DEFERRED
-          val vdMods = (vmods &~ defDefMask) | (dmods & defDefMask).flags
-          // for most cases lazy body should be taken from accessor DefDef
-          val vdRhs = if (vmods.isLazy) lazyValDefRhs(drhs) else vrhs
-          copyValDef(vd)(mods = vdMods, name = dname, rhs = vdRhs)
-        } getOrElse (vd)
+        tbody.collectFirst {
+          case DefDef(dmods, dname, _, _, _, drhs) if dname == vname.dropLocal =>
+            // get access flags from DefDef
+            val defDefMask = Flags.AccessFlags | OVERRIDE | IMPLICIT | DEFERRED
+            val vdMods = (vmods &~ defDefMask) | (dmods & defDefMask).flags
+            // for most cases lazy body should be taken from accessor DefDef
+            val vdRhs = if (vmods.isLazy) lazyValDefRhs(drhs) else vrhs
+            copyValDef(vd)(mods = vdMods, name = dname, rhs = vdRhs)
+        }.getOrElse(vd)
       // for abstract and some lazy val/vars
       case dd @ DefDef(mods, name, _, _, tpt, rhs) if mods.hasAccessorFlag =>
         // transform getter mods to field
@@ -529,6 +531,12 @@ abstract class TreeInfo {
   def firstConstructorArgs(stats: List[Tree]): List[Tree] = firstConstructor(stats) match {
     case DefDef(_, _, _, args :: _, _, _) => args
     case _                                => Nil
+  }
+
+  /** The modifiers of the first constructor in `stats`. */
+  def firstConstructorMods(stats: List[Tree]): Modifiers = firstConstructor(stats) match {
+    case DefDef(mods, _, _, _, _, _) => mods
+    case _                           => Modifiers()
   }
 
   /** The value definitions marked PRESUPER in this statement sequence */
@@ -779,7 +787,7 @@ abstract class TreeInfo {
    *      * targs = Nil
    *      * argss = List(List(arg11, arg12...), List(arg21, arg22, ...))
    */
-  class Applied(val tree: Tree) {
+  final class Applied(val tree: Tree) {
     /** The tree stripped of the possibly nested applications.
      *  The original tree if it's not an application.
      */
@@ -824,7 +832,18 @@ abstract class TreeInfo {
 
   /** Returns a wrapper that knows how to destructure and analyze applications.
    */
-  def dissectApplied(tree: Tree) = new Applied(tree)
+  final def dissectApplied(tree: Tree) = new Applied(tree)
+  /** Equivalent ot disectApplied(tree).core, but more efficient */
+  @scala.annotation.tailrec
+  final def dissectCore(tree: Tree): Tree = tree match {
+    case TypeApply(fun, _) =>
+      dissectCore(fun)
+    case Apply(fun, _) =>
+      dissectCore(fun)
+    case t =>
+      t
+  }
+
 
   /** Destructures applications into important subparts described in `Applied` class,
    *  namely into: core, targs and argss (in the specified order).
@@ -838,10 +857,10 @@ abstract class TreeInfo {
   object Applied {
     def apply(tree: Tree): Applied = new Applied(tree)
 
-    def unapply(applied: Applied): Option[(Tree, List[Tree], List[List[Tree]])] =
+    def unapply(applied: Applied): Some[(Tree, List[Tree], List[List[Tree]])] =
       Some((applied.core, applied.targs, applied.argss))
 
-    def unapply(tree: Tree): Option[(Tree, List[Tree], List[List[Tree]])] =
+    def unapply(tree: Tree): Some[(Tree, List[Tree], List[List[Tree]])] =
       unapply(dissectApplied(tree))
   }
 
@@ -986,6 +1005,7 @@ trait MacroAnnotionTreeInfo { self: TreeInfo =>
 
   def primaryConstructorArity(tree: ClassDef): Int = treeInfo.firstConstructor(tree.impl.body) match {
     case DefDef(_, _, _, params :: _, _, _) => params.length
+    case x                                  => throw new MatchError(x)
   }
 
   def anyConstructorHasDefault(tree: ClassDef): Boolean = tree.impl.body exists {
@@ -1006,11 +1026,11 @@ trait MacroAnnotionTreeInfo { self: TreeInfo =>
   def getAnnotationZippers(tree: Tree): List[AnnotationZipper] = {
     def loop[T <: Tree](tree: T, deep: Boolean): List[AnnotationZipper] = tree match {
       case SyntacticClassDef(mods, name, tparams, constrMods, vparamss, earlyDefs, parents, selfdef, body) =>
-        val czippers = mods.annotations.map(ann => {
+        val czippers = mods.annotations.map { ann =>
           val mods1 = mods.mapAnnotations(_ diff List(ann))
           val annottee = PatchedSyntacticClassDef(mods1, name, tparams, constrMods, vparamss, earlyDefs, parents, selfdef, body)
           AnnotationZipper(ann, annottee, annottee)
-        })
+        }
         if (!deep) czippers
         else {
           val tzippers = for {

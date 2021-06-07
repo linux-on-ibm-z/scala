@@ -36,7 +36,7 @@ trait BytecodeTesting extends ClearAfterClass {
    */
   def compilerArgs = ""
 
-  val compiler = cached("compiler", () => BytecodeTesting.newCompiler(extraArgs = compilerArgs))
+  val compiler: Compiler = cached("compiler", () => BytecodeTesting.newCompiler(extraArgs = compilerArgs))
 }
 
 class Compiler(val global: Global) {
@@ -68,7 +68,7 @@ class Compiler(val global: Global) {
     global.settings.outputDirs.setSingleOutput(new VirtualDirectory("(memory)", None))
   }
 
-  def newRun: global.Run = {
+  def newRun(): global.Run = {
     global.reporter.reset()
     resetOutput()
     keptPerRunCaches.foreach(_.clear())
@@ -86,7 +86,7 @@ class Compiler(val global: Global) {
   }
 
   def compileToBytes(scalaCode: String, javaCode: List[(String, String)] = Nil, allowMessage: StoreReporter.Info => Boolean = _ => false): List[(String, Array[Byte])] = {
-    val run = newRun
+    val run = newRun()
     run.compileSources(makeSourceFile(scalaCode, "unitTestSource.scala") :: javaCode.map(p => makeSourceFile(p._1, p._2)))
     checkReport(allowMessage)
     getGeneratedClassfiles(global.settings.outputDirs.getSingleOutput.get)
@@ -97,14 +97,14 @@ class Compiler(val global: Global) {
   }
 
   def compileClass(code: String, javaCode: List[(String, String)] = Nil, allowMessage: StoreReporter.Info => Boolean = _ => false): ClassNode = {
-    val List(c) = compileClasses(code, javaCode, allowMessage)
+    val List(c) = compileClasses(code, javaCode, allowMessage): @unchecked
     c
   }
 
   def compileToBytesTransformed(scalaCode: String, javaCode: List[(String, String)] = Nil, beforeBackend: global.Tree => global.Tree): List[(String, Array[Byte])] = {
     import global._
     settings.stopBefore.value = "jvm" :: Nil
-    val run = newRun
+    val run = newRun()
     val scalaUnit = newCompilationUnit(scalaCode, "unitTestSource.scala")
     val javaUnits = javaCode.map(p => newCompilationUnit(p._1, p._2))
     val units = scalaUnit :: javaUnits
@@ -112,7 +112,7 @@ class Compiler(val global: Global) {
     settings.stopBefore.value = Nil
     scalaUnit.body = beforeBackend(scalaUnit.body)
     checkReport(_ => false)
-    val run1 = newRun
+    val run1 = newRun()
     run1.compileUnits(units, run1.phaseNamed("jvm"))
     checkReport(_ => false)
     getGeneratedClassfiles(settings.outputDirs.getSingleOutput.get)
@@ -127,7 +127,7 @@ class Compiler(val global: Global) {
   }
 
   def compileAsmMethod(code: String, allowMessage: StoreReporter.Info => Boolean = _ => false): MethodNode = {
-    val List(m) = compileAsmMethods(code, allowMessage)
+    val List(m) = compileAsmMethods(code, allowMessage): @unchecked
     m
   }
 
@@ -135,12 +135,12 @@ class Compiler(val global: Global) {
     compileAsmMethods(code, allowMessage).map(convertMethod)
 
   def compileMethod(code: String, allowMessage: StoreReporter.Info => Boolean = _ => false): Method = {
-    val List(m) = compileMethods(code, allowMessage = allowMessage)
+    val List(m) = compileMethods(code, allowMessage = allowMessage): @unchecked
     m
   }
 
   def compileInstructions(code: String, allowMessage: StoreReporter.Info => Boolean = _ => false): List[Instruction] = {
-    val List(m) = compileMethods(code, allowMessage = allowMessage)
+    val List(m) = compileMethods(code, allowMessage = allowMessage): @unchecked
     m.instructions
   }
 }
@@ -235,7 +235,8 @@ object BytecodeTesting {
   def assertSameSummary(actual: List[Instruction], expected: List[Any]): Unit = {
     def expectedString = expected.map({
       case s: String => s""""$s""""
-      case i: Int => opcodeToString(i, i)
+      case i: Int    => opcodeToString(i, i)
+      case x         => throw new MatchError(x)
     }).mkString("List(", ", ", ")")
     assert(actual.summary == expected, s"\nFound   : ${actual.summaryText}\nExpected: $expectedString")
   }
@@ -275,7 +276,7 @@ object BytecodeTesting {
   }
 
   def findClass(cs: List[ClassNode], name: String): ClassNode = {
-    val List(c) = cs.filter(_.name == name)
+    val List(c) = cs.filter(_.name == name): @unchecked
     c
   }
 
@@ -328,7 +329,7 @@ object BytecodeTesting {
    * If `query` starts with a `+`, the next instruction is returned.
    */
   def findInstr(method: MethodNode, query: String): AbstractInsnNode = {
-    val List(i) = findInstrs(method, query)
+    val List(i) = findInstrs(method, query): @unchecked
     i
   }
 

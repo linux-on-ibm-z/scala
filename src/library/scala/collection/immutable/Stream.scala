@@ -21,6 +21,7 @@ import scala.annotation.tailrec
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.generic.SerializeEnd
 import scala.collection.mutable.{ArrayBuffer, StringBuilder}
+import scala.language.implicitConversions
 import Stream.cons
 
 @deprecated("Use LazyList (which is fully lazy) instead of Stream (which has a lazy tail only)", "2.13.0")
@@ -120,9 +121,6 @@ sealed abstract class Stream[+A] extends AbstractSeq[A]
     */
   def lazyAppendedAll[B >: A](suffix: => collection.IterableOnce[B]): Stream[B] =
     if (isEmpty) iterableFactory.from(suffix) else cons[B](head, tail.lazyAppendedAll(suffix))
-
-  override def equals(that: Any): Boolean =
-    if (this eq that.asInstanceOf[AnyRef]) true else super.equals(that)
 
   override def scanLeft[B](z: B)(op: (B, A) => B): Stream[B] =
     if (isEmpty) z +: iterableFactory.empty
@@ -357,6 +355,22 @@ sealed abstract class Stream[+A] extends AbstractSeq[A]
 @SerialVersionUID(3L)
 object Stream extends SeqFactory[Stream] {
 
+  /* !!! #11997 This `object cons` must be defined lexically *before* `class Cons` below.
+   * Otherwise it prevents Scala.js from building on Windows.
+   */
+  /** An alternative way of building and matching Streams using Stream.cons(hd, tl).
+    */
+  object cons {
+    /** A stream consisting of a given first element and remaining elements
+      *  @param hd   The first element of the result stream
+      *  @param tl   The remaining elements of the result stream
+      */
+    def apply[A](hd: A, tl: => Stream[A]): Stream[A] = new Cons(hd, tl)
+
+    /** Maps a stream to its head and tail */
+    def unapply[A](xs: Stream[A]): Option[(A, Stream[A])] = #::.unapply(xs)
+  }
+
   //@SerialVersionUID(3L) //TODO Putting an annotation on Stream.empty causes a cyclic dependency in unpickling
   object Empty extends Stream[Nothing] {
     override def isEmpty: Boolean = true
@@ -417,19 +431,6 @@ object Stream extends SeqFactory[Stream] {
       this
     }
 
-  }
-
-  /** An alternative way of building and matching Streams using Stream.cons(hd, tl).
-    */
-  object cons {
-    /** A stream consisting of a given first element and remaining elements
-      *  @param hd   The first element of the result stream
-      *  @param tl   The remaining elements of the result stream
-      */
-    def apply[A](hd: A, tl: => Stream[A]): Stream[A] = new Cons(hd, tl)
-
-    /** Maps a stream to its head and tail */
-    def unapply[A](xs: Stream[A]): Option[(A, Stream[A])] = #::.unapply(xs)
   }
 
   implicit def toDeferrer[A](l: => Stream[A]): Deferrer[A] = new Deferrer[A](() => l)

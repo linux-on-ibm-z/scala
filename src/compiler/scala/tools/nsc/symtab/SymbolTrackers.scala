@@ -133,7 +133,7 @@ trait SymbolTrackers {
           else " (" + Flags.flagsToString(masked) + ")"
       }
       def symString(sym: Symbol) = (
-        if (settings.debug && sym.hasCompleteInfo) {
+        if (settings.isDebug && sym.hasCompleteInfo) {
           val s = sym.defString take 240
           if (s.length == 240) s + "..." else s
         }
@@ -147,7 +147,7 @@ trait SymbolTrackers {
         else {
           indicatorString + indent + symString(root) + (
             if (children.isEmpty) ""
-            else children map (c => c.indentString(indent + "    ")) mkString ("\n", "\n", "")
+            else children.map(_.indentString(indent + "    ")).mkString("\n", "\n", "")
           )
         }
       }
@@ -186,15 +186,15 @@ trait SymbolTrackers {
         val ownerString = {
           val (few, rest) = sym.ownersIterator.splitAt(3)
           val ellipsis = Iterator("...").filter(_ => rest.hasNext)
-          (few ++ ellipsis).mkString(" -> ")
+          few.map(_.toString).concat(ellipsis).mkString(" -> ")
         }
         val treeStrings = symMap(sym).map(t => f"${t.shortClass}%10s: $t")
 
         (ownerString :: treeStrings).mkString("\n")
       }
-      def removedString = (removed: List[Symbol]).zipWithIndex map {
+      def removedString = (removed: List[Symbol]).zipWithIndex.map {
         case (t, i) => "(%2s) ".format(i + 1) + detailString(t)
-      } mkString "\n"
+      }.mkString("\n")
 
       "" + hierarchy + (
         if (removed.isEmpty) ""
